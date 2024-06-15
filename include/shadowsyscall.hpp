@@ -552,10 +552,10 @@ namespace shadow
     /// [IMPL] All methods and main classes are listed below
     ///
 
-    constexpr uint32_t generate_compile_seed() {
+    consteval std::uint32_t generate_compile_seed() {
         std::uint32_t hash = 0x2438529;
         for ( char c : __TIME__ ) {
-            hash ^= static_cast< uint32_t >( c ) * 0x1928231;
+            hash ^= static_cast< std::uint32_t >( c ) * 0x1928231;
         }
         return hash;
     }
