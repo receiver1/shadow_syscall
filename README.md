@@ -4,9 +4,7 @@ Easy to use syscall/lazy import wrapper. Syscall is based on shellcode. Function
 Supports x86 architecture, but on x86 `.shadowsyscall()` is inaccessible.
 
 ### Supported platforms
-CLANG - cpp20
-GCC - cpp20
-MSVC - cpp20
+CLANG, GCC, MSVC. Library requires cpp20
 
 ### Quick example
 ```cpp
