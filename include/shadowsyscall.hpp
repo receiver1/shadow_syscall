@@ -1155,14 +1155,14 @@ inline ReturnType shadowsyscall( shadow::hash_t syscall_name, Args&&... args )
           "shadowsyscall is not supported on the x86 architecture" );
 
     shadow::syscalls::c_syscall<ReturnType> syscall{ syscall_name };
-    return syscall.call( std::forward<Args&&>( args ) ... );
+    return syscall.call( std::forward<Args>( args ) ... );
 }
 
 template<typename ReturnType, class... Args>
 inline ReturnType shadowcall( shadow::hash_t export_name, Args&&... args )
 {
     shadow::syscalls::c_importer<ReturnType> importer{ export_name };
-    return importer.call( std::forward<Args&&>( args ) ... );
+    return importer.call( std::forward<Args>( args ) ... );
 }
 
 #endif
