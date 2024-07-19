@@ -3,6 +3,8 @@
 Easy to use syscall/lazy import wrapper. Syscall is based on shellcode. Function names are hashed, library doesn't leave any strings or imports.
 Supports x86 architecture, but on x86 `.shadowsyscall()` is inaccessible.
 
+Allows calling undocumented DLL functions. Allows to call forwarded imports (HeapAlloc, etc.)
+
 ### Supported platforms
 CLANG, GCC, MSVC. Library requires cpp20
 
@@ -26,44 +28,85 @@ Shellcode uses ```NtAllocateVirtualMemory | NtFreeVirtualMemory```, functions to
 ```cpp
 int main()
 {
-    /// Enumerate every module loaded to current process
-    ///
+    shadowcall<int>( "LoadLibraryA", "user32.dll" );
+
+    // Enumerate every module loaded to current process
     for ( const auto& module : shadow::c_modules_range{} )
         std::wcout << module->name.to_wstring() << "\n";
 
-    /// Find exactly known module loaded to current process
-    /// "ntdll.dll" doesn't leave string in executable, it
-    /// being hashed on compile-time with conclusive guarantee
-    ///
+    // Find exactly known module loaded to current process
+    // "ntdll.dll" doesn't leave string in executable, it
+    // being hashed on compile-time with consteval guarantee
     auto module = shadow::c_module{ "ntdll.dll" };
+    auto exports = shadow::c_exports{ module };
 
-    /// Enumerate EAT of `module`
-    ///
-    for ( const auto& [export_name, export_address] : shadow::c_exports{ module } )
+    // Enumerate EAT of `module`
+    for ( const auto& [export_name, export_address] : exports )
         std::cout << export_name << " : " << export_address << "\n";
 
-    /// Enumerate sections of `module`
-    ///
-    for ( const auto& section : module.image()->get_nt_headers()->sections() )
-        std::cout << section.name.to_string() << "\n";
+    std::string_view target_export_name = "RtlTimeToTimeFields";
 
-    /// Execute any export at runtime
-    ///
+    // Find export in EAT with user-defined predicate
+    auto it = exports.find_if( [target_export_name]( const auto& pair ) -> bool {
+        const auto& [name, address] = pair;
+        return name == target_export_name;
+    } );
+
+    if ( it != exports.end() ) {
+        const auto& [name, address] = *it;
+        std::cout << "Target export found: " << name << " : " << address << '\n';
+    }
+    else {
+        std::cout << "Failed to find target export.\n";
+    }
+
+    // Enumerate sections of `module`
+    for ( const auto& section : module.image()->get_nt_headers()->sections() )
+        std::cout << section.name.to_string() << '\n';
+
+    // Execute any export at runtime
     shadowcall<int>( "MessageBoxA", nullptr, "string 1", "string 2", MB_OK );
 
-    /// We need to call actually `MessageBoxA`, but not just MessageBox,
-    /// because the MessageBox is just a line of code defined by
-    /// Microsoft, the actual export is MessageBoxA / MessageBoxW.
+    shadowcall<int>( { "MessageBoxA", "user32.dll" }, nullptr, "string 1", "string 2", MB_OK );
+
+    // We need to call actually `MessageBoxA`, but not just MessageBox,
+    // because the MessageBox is just a #define from WinAPI
+    // the actual export is MessageBoxA / MessageBoxW.
     // MessageBoxA( nullptr, "string 1", "string 2", MB_OK );
 
-    /// Execute syscall
-    ///
+    HANDLE process = reinterpret_cast< HANDLE >( -1 );
+
+    auto start_routine = []( void* ) -> DWORD {
+        std::cout << "thread started!\n";
+        return 0;
+    };
+
+    auto status = shadowsyscall<NTSTATUS>(
+        "NtCreateThreadEx",
+        &process,
+        THREAD_ALL_ACCESS,
+        NULL,
+        process,
+        static_cast< LPTHREAD_START_ROUTINE >( start_routine ),
+        0,
+        FALSE,
+        NULL, // from v1.1 nullptr can be replaced with `0`
+        NULL,
+        NULL,
+        0
+    );
+
+    std::cout << "NtCreateThreadEx call status: 0x" << std::hex << status << '\n';
+
+    // Find an export address
+    auto export_address = shadow::c_export{ "NtTerminateProcess" };
+
+    std::cout << "NtTerminateProcess address: 0x" << std::hex << export_address << "\n";
+    std::cout << "NtTerminateProcess address: " << export_address.to_pointer() << "\n";
+
     shadowsyscall<NTSTATUS>( "NtTerminateProcess", reinterpret_cast< HANDLE >( -1 ), -6932 );
 
-    /// Find an export address
-    ///
-    auto export_address = shadow::find_export_address( "NtTerminateProcess" );
-    // do something with the export
+    return 0;
 }
 ```
 
