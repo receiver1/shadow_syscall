@@ -1,11 +1,11 @@
-/// [FAQ / Examples] here: https://github.com/annihilatorq/shadow_syscall
+// [FAQ / Examples] here: https://github.com/annihilatorq/shadow_syscall
 
-/// Creator Discord - @ntraiseharderror,
-/// Telegram - https://t.me/annihilatorq,
-/// Github - https://github.com/annihilatorq
+// Creator Discord - @ntraiseharderror,
+// Telegram - https://t.me/annihilatorq,
+// Github - https://github.com/annihilatorq
 
-/// Credits to https://github.com/can1357/linux-pe for the very pretty structs
-/// Special thanks to @inversion
+// Credits to https://github.com/can1357/linux-pe for the very pretty structs
+// Special thanks to @inversion
 
 #ifndef SHADOWSYSCALL_HPP
 #define SHADOWSYSCALL_HPP
@@ -27,6 +27,7 @@
 #include <span>
 #include <variant>
 #include <iostream>
+#include <algorithm>
 #include <intrin.h>
 
 namespace shadow
@@ -386,8 +387,13 @@ namespace shadow
             uint32_t                    num_data_directories;
             data_directories_x86_t      data_directories;
 
-            inline bool has_directory( const data_directory_t* dir ) const { return &data_directories.entries[ num_data_directories ] < dir && dir->present(); }
-            inline bool has_directory( directory_id id ) const { return has_directory( &data_directories.entries[ id ] ); }
+            inline bool has_directory( const data_directory_t* dir ) const {
+                return &data_directories.entries[ num_data_directories ] < dir && dir->present();
+            }
+
+            inline bool has_directory( directory_id id ) const {
+                return has_directory( &data_directories.entries[ id ] );
+            }
         };
 
         template<bool x64 = is_arch_x64>
@@ -402,14 +408,12 @@ namespace shadow
             optional_header_t<x64>      optional_header;
 
             // Section getters
-            //
             inline section_header_t* get_sections() { return ( section_header_t* ) ( ( uint8_t* ) &optional_header + file_header.size_optional_header ); }
             inline section_header_t* get_section( size_t n ) { return n >= file_header.num_sections ? nullptr : get_sections() + n; }
             inline const section_header_t* get_sections() const { return const_cast< nt_headers_t* >( this )->get_sections(); }
             inline const section_header_t* get_section( size_t n ) const { return const_cast< nt_headers_t* >( this )->get_section( n ); }
 
             // Section iterator
-            //
             template<typename T>
             struct proxy
             {
@@ -458,7 +462,6 @@ namespace shadow
             dos_header_t                dos_header;
 
             // Basic getters.
-            //
             inline dos_header_t* get_dos_headers() { return &dos_header; }
             inline const dos_header_t* get_dos_headers() const { return &dos_header; }
             inline file_header_t* get_file_header() { return dos_header.get_file_header(); }
@@ -485,7 +488,6 @@ namespace shadow
             inline T* rva_to_ptr( uint32_t rva, size_t length = 1 )
             {
                 // Find the section, try mapping to header if none found.
-                //
                 auto scn = rva_to_section( rva );
                 if ( !scn ) {
                     uint32_t rva_hdr_end = get_nt_headers()->optional_header.size_headers;
@@ -495,13 +497,11 @@ namespace shadow
                 }
 
                 // Apply the boundary check.
-                //
                 size_t offset = rva - scn->virtual_address;
                 if ( ( offset + length ) > scn->size_raw_data )
                     return nullptr;
 
                 // Return the final pointer.
-                //
                 return ( T* ) ( ( uint8_t* ) &dos_header + scn->ptr_raw_data + offset );
             }
 
@@ -548,9 +548,6 @@ namespace shadow
     }
 
 
-    ///
-    /// [IMPL] All methods and main classes are listed below
-    ///
 
     consteval std::uint32_t generate_compile_seed() {
         std::uint32_t hash = 0x2438529;
@@ -587,8 +584,6 @@ namespace shadow
 
     public: // Methods
 
-        /// \return generated hash value of value_t based on string contents (as default it's std::uint32_t)
-        ///
         template<typename CharT>
         value_t generate( string_view_t<CharT> string )
         {
@@ -618,13 +613,31 @@ namespace shadow
         }
 
         template<typename CharT>
-        inline constexpr CharT to_lower( CharT c ) const { return ( ( c >= 'A' && c <= 'Z' ) ? ( c + 32 ) : c ); }
+        inline constexpr CharT to_lower( CharT c ) const {
+            return ( ( c >= 'A' && c <= 'Z' ) ? ( c + 32 ) : c );
+        }
 
     private: // Variables
         value_t m_value{ generate_compile_seed() };
     };
 
+    // Used in `shadowcall` to create a pair with syntax such as { "name", "name" }
+    struct hashpair
+    {
+        consteval hashpair( shadow::hash_t first_, shadow::hash_t second_ ) :
+            first( first_ ),
+            second( second_ )
+        {}
 
+        shadow::hash_t first;
+        shadow::hash_t second;
+    };
+
+    namespace literals {
+        hash_t operator""_hash( const char* str, size_t ) {
+            return hash_t( str );
+        }
+    }
 
     /// \brief Class that's responsible for parsing exports from DLL
     /// \brief Allowed for external use
@@ -633,30 +646,32 @@ namespace shadow
     class c_exports
     {
     public:
-        explicit c_exports( void* base_address ) noexcept : m_module_base( reinterpret_cast< std::uintptr_t >( base_address ) ) {
-            parse_export_table( reinterpret_cast< std::uintptr_t >( base_address ) );
-        }
+        explicit c_exports( void* base_address ) noexcept :
+            m_module_base( reinterpret_cast< std::uintptr_t >( base_address ) ),
+            m_export_table( get_export_directory( reinterpret_cast< std::uintptr_t >( base_address ) ) )
+        {}
 
-        explicit c_exports( std::uintptr_t base_address ) noexcept : m_module_base( base_address ) {
-            parse_export_table( base_address );
-        }
+        explicit c_exports( std::uintptr_t base_address ) noexcept :
+            m_module_base( base_address ),
+            m_export_table( get_export_directory( base_address ) )
+        {}
 
         std::size_t size() const noexcept {
             return m_export_table->num_names;
         }
 
-        const win::export_directory_t* table() const noexcept
-        {
+        const win::export_directory_t* table() const noexcept {
             return m_export_table;
         }
 
         std::string_view name( std::size_t index ) const noexcept
         {
-            std::span<const std::uint32_t> rva_names_array{
+            std::span<const std::uint32_t> rva_names{
                 reinterpret_cast< const std::uint32_t* >( m_module_base + m_export_table->rva_names ),
                 m_export_table->num_names
             };
-            std::uint32_t rva_name = rva_names_array[ index ];
+
+            std::uint32_t rva_name = rva_names[ index ];
             const char* name_address = reinterpret_cast< const char* >( m_module_base + rva_name );
 
             return { name_address };
@@ -674,6 +689,17 @@ namespace shadow
             return function_address;
         }
 
+        bool is_export_forwarded( const std::uintptr_t export_address ) const noexcept
+        {
+            auto image = win::image_from_base( m_module_base );
+            auto export_data_dir = image->get_optional_header()->data_directories.export_directory;
+
+            const std::uintptr_t export_table_start = m_module_base + export_data_dir.rva;
+            const std::uintptr_t export_table_end = export_table_start + export_data_dir.size;
+
+            return ( export_address >= export_table_start ) && ( export_address < export_table_end );
+        }
+
         class iterator {
         public:
             using iterator_category = std::forward_iterator_tag;
@@ -682,49 +708,78 @@ namespace shadow
             using pointer = value_type*;
             using reference = value_type&;
 
-            iterator( const c_exports* exports, std::size_t index ) : m_exports( exports ), m_index( index ) {
+            iterator( const c_exports* exports, std::size_t index ) noexcept
+                : m_exports( exports ), m_index( index ), m_value() {
                 if ( m_index < m_exports->size() ) {
                     update_value();
                 }
             }
 
-            reference operator*() {
+            reference operator*() const noexcept {
+                thread_local static value_type dummy{};
                 return m_value;
             }
 
-            pointer operator->() {
+            pointer operator->() const noexcept {
+                thread_local static value_type dummy{};
                 return &m_value;
             }
 
-            iterator& operator++() {
-                update_value();
-                ++m_index;
+            iterator& operator=( const iterator& other ) noexcept {
+                if ( this != &other ) {
+                    m_index = other.m_index;
+                    m_value = other.m_value;
+                }
                 return *this;
             }
 
-            iterator operator++( int ) {
+            iterator& operator++() noexcept {
+                if ( m_index < m_exports->size() ) {
+                    ++m_index;
+
+                    if ( m_index < m_exports->size() )
+                        update_value();
+                    else
+                        clear_value();
+                }
+                else {
+                    clear_value();
+                }
+                return *this;
+            }
+
+            iterator operator++( int ) noexcept {
                 iterator temp = *this;
                 ++( *this );
                 return temp;
             }
 
-            bool operator==( const iterator& other ) const {
-                return m_index == other.m_index;
+            bool operator==( const iterator& other ) const noexcept {
+                return m_index == other.m_index && m_exports == other.m_exports;
             }
 
-            bool operator!=( const iterator& other ) const {
+            bool operator!=( const iterator& other ) const noexcept {
                 return !( *this == other );
             }
 
         private:
-            void update_value() {
-                m_value.first = m_exports->name( m_index );
-                m_value.second = m_exports->address( m_index );
+            void update_value() noexcept {
+                auto& [name, address] = m_value;
+                if ( m_index < m_exports->size() ) {
+                    name = m_exports->name( m_index );
+                    address = m_exports->address( m_index );
+                }
+            }
+
+            void clear_value() noexcept {
+                auto& [name, address] = m_value;
+                name = "";
+                address = 0;
             }
 
             const c_exports* m_exports;
             std::size_t m_index;
-            value_type m_value;
+            mutable value_type m_value;
         };
 
         iterator begin() const noexcept { return iterator( this, 0 ); }
@@ -737,27 +792,28 @@ namespace shadow
         ///
         iterator find( hash_t export_name ) const noexcept
         {
-            if ( export_name == 0 ) {
+            if ( export_name == 0 )
                 return end();
-            }
 
-            for ( auto it = begin(); it != end(); ++it ) {
-                if ( export_name == hash_t{}.generate( it->first ) ) {
-                    return it;
-                }
-            }
+            auto it = std::find_if( begin(), end(), [export_name]( const auto& pair ) -> bool {
+                const auto& [name, address] = pair;
+                return export_name == hash_t{}.generate( name );
+            } );
 
-            return end();
+            return it;
+        }
+
+        iterator find_if( std::predicate<iterator::value_type> auto predicate )
+        {
+            return std::find_if( begin(), end(), predicate );
         }
 
     private:
-        void parse_export_table( std::uintptr_t base_address )
+        win::export_directory_t* get_export_directory( std::uintptr_t base_address ) const noexcept
         {
             auto image = win::image_from_base( base_address );
-            auto export_data_directory = image->get_optional_header()->data_directories.export_directory;
-            if ( export_data_directory.present() ) {
-                m_export_table = reinterpret_cast< win::export_directory_t* >( m_module_base + export_data_directory.rva );
-            }
+            auto export_data_dir = image->get_optional_header()->data_directories.export_directory;
+            return reinterpret_cast< win::export_directory_t* >( m_module_base + export_data_dir.rva );
         }
 
         std::uintptr_t m_module_base;
@@ -768,13 +824,12 @@ namespace shadow
     class c_modules_range
     {
     public:
-        c_modules_range()
+        c_modules_range( bool skip_current_module = false )
         {
             auto entry = &win::peb_t::loader_data()->in_load_order_module_list;
 
-            /// Skip current module
-            ///
-            m_begin = entry->flink->flink;
+            // Skip current module
+            m_begin = ( skip_current_module ? entry->flink->flink : entry->flink );
             m_end = entry;
         }
 
@@ -871,19 +926,97 @@ namespace shadow
         hash_t m_hashed_name;
     };
 
-    std::uintptr_t find_export_address( hash_t export_name ) noexcept
+    class c_export
     {
-        for ( const auto& module : c_modules_range{} )
-        {
-            c_exports exports{ module->dll_base };
+    public:
+        c_export( hash_t export_name, hash_t module_hash = 0 ) noexcept :
+            m_address( find_export_address( export_name, module_hash ) )
+        {}
 
-            if ( auto it = exports.find( export_name ); it != exports.end() ) {
-                return it->second;
+        std::uintptr_t find_export_address( hash_t export_name, hash_t module_hash = 0 ) noexcept
+        {
+            if ( export_name == 0 )
+                return 0;
+
+            constexpr bool skip_current_module = true;
+            const auto loaded_modules = c_modules_range{ skip_current_module };
+
+            for ( const auto& module : loaded_modules ) {
+
+                if ( module_hash != 0 && module_hash_invalid( module_hash, module->name.to_wstring() ) )
+                    continue;
+
+                c_exports exports{ module->dll_base };
+
+                auto export_it = exports.find_if( [export_name]( const auto& pair ) -> bool {
+                    const auto& [name, address] = pair;
+                    return export_name == hash_t{}.generate( name );
+                } );
+
+                if ( export_it == exports.end() )
+                    continue;
+
+                const auto& [_, address] = *export_it;
+                if ( exports.is_export_forwarded( address ) )
+                    return handle_forwarded_export( address );
+
+                return address;
             }
+
+            return 0;
         }
 
-        return 0;
-    }
+        void* to_pointer() const {
+            return reinterpret_cast< void* >( m_address );
+        }
+
+        operator std::uintptr_t() {
+            return m_address;
+        }
+
+    private:
+        bool module_hash_invalid( hash_t module_hash, std::wstring_view module_name )
+        {
+            // Try to compare hash of full module name
+            auto full_name_hash = hash_t{}.generate( module_name );
+
+            // Try to compare hash of trimmed module name
+            auto trimmed_name = module_name.substr( 0, module_name.size() - 4 );
+            auto trimmed_name_hash = hash_t{}.generate( trimmed_name );
+
+            // Verify both hashes
+            return full_name_hash != module_hash && trimmed_name_hash != module_hash;
+        }
+
+        std::uintptr_t handle_forwarded_export( std::uintptr_t address )
+        {
+            // In a forwarded export, the address is a string containing
+            // information about the actual export and its location
+            // They are always presented as "module_name.export_name"
+            auto forwarded_export_name = reinterpret_cast< const char* >( address );
+
+            // Split forwarded export to module name and real export name
+            auto [module_name, real_export_name] = split_forwarded_export_name( forwarded_export_name, '.' );
+
+            // Perform call with the name of the real export, with a pre-known module
+            return find_export_address( hash_t{}.generate( real_export_name ), hash_t{}.generate( module_name ) );
+        }
+
+        std::pair<std::string_view, std::string_view> split_forwarded_export_name(
+            std::string_view view, char delimiter ) const noexcept
+        {
+            auto pos = view.find( delimiter );
+            if ( pos != std::string_view::npos ) {
+                std::string_view first_part = view.substr( 0, pos );
+                std::string_view second_part = view.substr( pos + 1 );
+                return { first_part, second_part };
+            }
+
+            return { view, {} };
+        }
+
+        std::uintptr_t m_address{ 0 };
+    };
 
     ///
     /// Syscall part
@@ -895,8 +1028,7 @@ namespace shadow
         {
             using NTSTATUS = std::int32_t;
 
-            /// `VirtualAlloc` function pseudo-code from `kernelbase.dll`
-            ///
+            // `VirtualAlloc` function pseudo-code from `kernelbase.dll`
             void* nt_virtual_alloc( std::uintptr_t function_ptr, void* address, std::uint64_t allocation_size, std::uint32_t allocation_t, std::uint32_t flProtect )
             {
                 using function_t = NTSTATUS( __stdcall* )( void*, void*, std::uint64_t, std::uint64_t*, std::uint32_t, std::uint32_t );
@@ -909,8 +1041,7 @@ namespace shadow
                 return result >= 0 ? base_address : nullptr;
             }
 
-            /// `VirtualFree` function pseudo-code from `kernelbase.dll`
-            ///
+            // `VirtualFree` function pseudo-code from `kernelbase.dll`
             bool nt_virtual_free( std::uintptr_t function_ptr, void* address, std::uint64_t allocation_size, std::uint32_t free_t )
             {
                 using function_t = NTSTATUS( __stdcall* )( void*, void*, std::uint64_t*, std::uint32_t );
@@ -941,8 +1072,8 @@ namespace shadow
                 if ( m_allocate_address && m_free_address )
                     return;
 
-                m_allocate_address = find_export_address( "NtAllocateVirtualMemory" );
-                m_free_address = find_export_address( "NtFreeVirtualMemory" );
+                m_allocate_address = c_export( "NtAllocateVirtualMemory", "ntdll.dll" );
+                m_free_address = c_export( "NtFreeVirtualMemory", "ntdll.dll" );
             }
 
             void* allocate( std::uint64_t size ) const noexcept {
@@ -965,10 +1096,11 @@ namespace shadow
         {
         public:
             template<class... Args>
-            c_shellcode( Args&&... list ) noexcept : m_shellcode{ static_cast< std::uint8_t >( std::forward<Args&&>( list ) )... }
+            c_shellcode( Args&&... list ) noexcept :
+                m_shellcode{ static_cast< std::uint8_t >( std::forward<Args&&>( list ) )... }
             {
-                static_assert( ( std::is_convertible_v<Args, std::uint8_t> && ... ), "all arguments must be convertible to std::uint8_t" );
-                static_assert( shell_size != 0, "shellcode size cannot be zero" );
+                static_assert( ( std::is_convertible_v<Args, std::uint8_t> && ... ), "All arguments must be convertible to std::uint8_t" );
+                static_assert( shell_size != 0, "Shellcode size cannot be zero" );
 
                 m_allocator.initialize();
             }
@@ -992,8 +1124,7 @@ namespace shadow
                 m_shellcode_fn = m_memory;
             }
 
-            void write_uint32( std::uint32_t index, std::uint32_t value ) noexcept
-            {
+            void write_uint32( std::uint32_t index, std::uint32_t value ) noexcept {
                 *reinterpret_cast< std::uint32_t* >( &m_shellcode[ index ] ) = value;
             }
 
@@ -1049,14 +1180,16 @@ namespace shadow
         class c_syscall
         {
         public:
-            explicit c_syscall( hash_t syscall_name ) : m_syscall_name_hash( syscall_name ), m_syscall_index( 0 ) {}
+            explicit c_syscall( hash_t syscall_name ) :
+                m_syscall_name_hash( syscall_name ),
+                m_syscall_index( 0 )
+            {}
 
             template<typename... Args>
             ReturnType call( Args... args ) noexcept
             {
                 get_syscall_id();
                 setup_shellcode();
-
                 return reinterpret_cast< ReturnType( __stdcall* )( Args... ) >( m_shellcode.m_shellcode_fn )( args... );
             }
 
@@ -1075,7 +1208,7 @@ namespace shadow
                 }
 #endif
 
-                auto routine_address = find_export_address( m_syscall_name_hash );
+                auto routine_address = c_export( m_syscall_name_hash );
 
 #if SHADOWSYSCALLS_CACHING
                 cache.try_emplace( m_syscall_name_hash, routine_address );
@@ -1084,6 +1217,7 @@ namespace shadow
                 m_syscall_index = parse_syscall_id( routine_address );
             }
 
+            // Syscall ID is at an offset of 4 bytes from the specified address.
             std::uint32_t parse_syscall_id( std::uintptr_t export_address ) const {
                 return *reinterpret_cast< std::uint32_t* >( static_cast< std::uintptr_t >( export_address + 4 ) );
             }
@@ -1106,7 +1240,9 @@ namespace shadow
         class c_importer
         {
         public:
-            explicit c_importer( hash_t import_name ) : m_export_address( get_export_address( import_name ) ) {}
+            explicit c_importer( hash_t import_name, hash_t module_name = 0 ) :
+                m_export_address( get_export_address( import_name, module_name ) )
+            {}
 
             template<typename... Args>
             ReturnType call( Args... args ) noexcept
@@ -1118,23 +1254,51 @@ namespace shadow
             }
 
         private:
-            std::uintptr_t get_export_address( hash_t import_name )
+            std::uintptr_t get_export_address( hash_t import_name, hash_t module_name )
             {
 #if SHADOWSYSCALLS_CACHING
                 auto address = cache.get_address( static_cast< c_address_cache::key_t >( import_name ) );
                 if ( address == 0 ) {
-                    address = find_export_address( import_name );
+                    address = c_export( import_name, module_name );
                     cache.try_emplace( static_cast< c_address_cache::key_t >( import_name ), address );
                 }
 
                 return address;
 #else
-                return find_export_address( import_name );
+                return c_export( import_name );
 #endif
             }
 
             std::uintptr_t m_export_address{ 0 };
         };
+
+        template <typename T>
+        auto convert_nulls_to_nullptrs( T arg )
+        {
+            // All credits to @Debounce, huge thanks to him/her!
+            //
+            // Since arguments after the fourth are written on the stack,
+            // the compiler will fill the lower 32 bits from int with null,
+            // and the upper 32 bits will remain undefined.
+            //
+            // Because the syscall handler expects a (void*)-sized pointer
+            // there, this address will be garbage for it, hence AV.
+            // If the argument went 1/2/3/4, the compiler would generate a
+            // write to ecx/edx/r8d/r9d, by x64 convention, writing to the
+            // lower half of a 64 - bit register zeroes the upper part too
+            // ( i.e.ecx = 0 = > rcx = 0 ), so this problem should only exist
+            // on x64 for arguments after the fourth.
+            // The solution would be on templates to loop through all
+            // arguments and manually cast them to size_t size.
+
+            constexpr auto is_signed_integral = std::signed_integral<T>;
+            constexpr auto is_unsigned_integral = std::unsigned_integral<T>;
+
+            using unsigned_integral_type = std::conditional_t<is_unsigned_integral, std::uintptr_t, T>;
+            using tag_type = std::conditional_t<is_signed_integral, std::intptr_t, unsigned_integral_type>;
+
+            return static_cast< tag_type >( arg );
+        }
     }
 }
 
@@ -1148,21 +1312,26 @@ struct std::hash<shadow::hash_t> {
 template<typename ReturnType, class... Args>
 inline ReturnType shadowsyscall( shadow::hash_t syscall_name, Args&&... args )
 {
-    /// because of typename conditions, we won't trigger
-    /// static_assert when this method isn't called.
-    ///
     static_assert( ( shadow::is_arch_x64 && !std::is_same_v<ReturnType, std::monostate> ),
           "shadowsyscall is not supported on the x86 architecture" );
 
     shadow::syscalls::c_syscall<ReturnType> syscall{ syscall_name };
-    return syscall.call( std::forward<Args>( args ) ... );
+    return syscall.call( shadow::syscalls::convert_nulls_to_nullptrs( args ) ... );
 }
 
 template<typename ReturnType, class... Args>
 inline ReturnType shadowcall( shadow::hash_t export_name, Args&&... args )
 {
     shadow::syscalls::c_importer<ReturnType> importer{ export_name };
-    return importer.call( std::forward<Args>( args ) ... );
+    return importer.call( shadow::syscalls::convert_nulls_to_nullptrs( args ) ... );
+}
+
+template<typename ReturnType, class... Args>
+inline ReturnType shadowcall( shadow::hashpair export_and_module_names, Args&&... args )
+{
+    const auto& [export_name, module_name] = export_and_module_names;
+    shadow::syscalls::c_importer<ReturnType> importer{ export_name, module_name };
+    return importer.call( shadow::syscalls::convert_nulls_to_nullptrs( args ) ... );
 }
 
 #endif
