@@ -1164,13 +1164,11 @@ namespace shadow
             }
 
         private:
-            /// Making sure that's every `cache_map` call is safe.
-            ///
+            // Making sure that's every `cache_map` call is safe.
             std::shared_mutex m_cache_mutex{};
 
-            /// Store addresses by std::uintptr_t insted of indexes
-            /// itself, so this map can be reused for importer needs.
-            ///
+            // Store addresses by std::uintptr_t insted of indexes
+            // itself, so this map can be reused for importer needs.
             std::unordered_map<key_t, address_t> m_cache_map{};
         } static inline cache;
 
