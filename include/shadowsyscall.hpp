@@ -634,7 +634,7 @@ namespace shadow
     };
 
     namespace literals {
-        hash_t operator""_hash( const char* str, size_t ) {
+        inline hash_t operator""_hash( const char* str, size_t ) {
             return hash_t( str );
         }
     }
@@ -1029,7 +1029,7 @@ namespace shadow
             using NTSTATUS = std::int32_t;
 
             // `VirtualAlloc` function pseudo-code from `kernelbase.dll`
-            void* nt_virtual_alloc( std::uintptr_t function_ptr, void* address, std::uint64_t allocation_size, std::uint32_t allocation_t, std::uint32_t flProtect )
+            inline void* nt_virtual_alloc( std::uintptr_t function_ptr, void* address, std::uint64_t allocation_size, std::uint32_t allocation_t, std::uint32_t flProtect )
             {
                 using function_t = NTSTATUS( __stdcall* )( void*, void*, std::uint64_t, std::uint64_t*, std::uint32_t, std::uint32_t );
 
@@ -1042,7 +1042,7 @@ namespace shadow
             }
 
             // `VirtualFree` function pseudo-code from `kernelbase.dll`
-            bool nt_virtual_free( std::uintptr_t function_ptr, void* address, std::uint64_t allocation_size, std::uint32_t free_t )
+            inline bool nt_virtual_free( std::uintptr_t function_ptr, void* address, std::uint64_t allocation_size, std::uint32_t free_t )
             {
                 using function_t = NTSTATUS( __stdcall* )( void*, void*, std::uint64_t*, std::uint32_t );
 
