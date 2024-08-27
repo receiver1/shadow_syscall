@@ -10,12 +10,10 @@ CLANG, GCC, MSVC. Library requires cpp20
 
 ### Quick example
 ```cpp
-/// Execute syscall
-///
+// Execute syscall
 shadowsyscall<NTSTATUS>( "NtTerminateProcess", reinterpret_cast< HANDLE >( -1 ), -6932 );
 
-/// Execute any export at runtime
-///
+// Execute any export at runtime
 shadowcall<int>( "MessageBoxA", nullptr, "string 1", "string 2", MB_OK );
 ```
 
@@ -119,7 +117,7 @@ int main()
 - Enumerate EAT of module.
 - Resolve PE-headers and directories of module.
 - Compile-time hashing export.
-- Hash seed is pseudo-randomized, based on compilation time.
+- Hash seed is pseudo-randomized, based on header file location
 - Execute syscall.
 - Execute any export at runtime.
 - Doesn't leave any imports in the executable.
