@@ -550,8 +550,13 @@ namespace shadow
 
 
     consteval std::uint32_t generate_compile_seed() {
-        std::uint32_t hash = 0x2438529;
-        for ( char c : __TIME__ ) {
+        std::uint32_t hash = __cplusplus;
+
+        // \note: @annihilatorq Fix note since 27.08.2024:
+        // We cannot use __TIME__ or alternatives here since
+        // such macros represent the build time of a translation
+        // unit, not the build time of the entire project.
+        for ( char c : __FILE__ ) {
             hash ^= static_cast< std::uint32_t >( c ) * 0x1928231;
         }
         return hash;
