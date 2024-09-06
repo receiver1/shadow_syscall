@@ -547,8 +547,6 @@ namespace shadow
         }
     }
 
-
-
     consteval std::uint32_t generate_compile_seed() {
         std::uint32_t hash = __cplusplus;
 
@@ -569,7 +567,7 @@ namespace shadow
 
         template<typename CharT>
         using string_view_t = std::basic_string_view<CharT>;
-        using value_t = std::uint32_t;
+        using value_t = std::uint64_t;
 
     public: // Constructors
 
@@ -1023,6 +1021,12 @@ namespace shadow
         std::uintptr_t m_address{ 0 };
     };
 
+    // Names for generic error codes
+    enum errc : std::uint32_t {
+        ssn_not_found = 13, // System Service Number can't be found
+        export_not_found = 14 // Such export doesn't exist
+    };
+
     ///
     /// Syscall part
     ///
@@ -1179,67 +1183,99 @@ namespace shadow
 
 #endif
 
-        template<typename ReturnType>
+        template<typename Ty, typename ErrTy>
+        struct call_result_t {
+            Ty value;
+            std::optional<ErrTy> error;
+
+            operator Ty() {
+                return value;
+            }
+        };
+
+        template<typename Ty>
         class c_syscall
         {
         public:
             explicit c_syscall( hash_t syscall_name ) :
                 m_syscall_name_hash( syscall_name ),
-                m_syscall_index( 0 )
+                m_service_number( 0 ),
+                m_last_error( std::nullopt )
             {}
 
             template<typename... Args>
-            ReturnType call( Args... args ) noexcept
+            Ty call( Args... args ) noexcept
             {
-                get_syscall_id();
+                auto parse_result = resolve_service_number();
+                if ( !parse_result )
+                    return Ty{}; // Expected that Ty is default-constructable
                 setup_shellcode();
-                return reinterpret_cast< ReturnType( __stdcall* )( Args... ) >( m_shellcode.m_shellcode_fn )( args... );
+                return reinterpret_cast< Ty( __stdcall* )( Args... ) >( m_shellcode.m_shellcode_fn )( args... );
+            }
+
+            std::optional<errc> get_last_error() const noexcept {
+                return m_last_error;
             }
 
         private:
             void setup_shellcode() noexcept {
-                m_shellcode.write_uint32( 6, m_syscall_index );
+                m_shellcode.write_uint32( 6, m_service_number );
                 m_shellcode.setup_shellcode();
             }
 
-            void get_syscall_id()
+            bool resolve_service_number()
             {
 #if SHADOWSYSCALLS_CACHING
-                if ( auto address = cache.get_address( m_syscall_name_hash ); address != 0 ) {
-                    m_syscall_index = parse_syscall_id( address );
-                    return;
+                auto cache_address = cache.get_address( m_syscall_name_hash );
+                if ( cache_address != 0 ) {
+                    m_service_number = get_ssn_from_address( cache_address );
+                    return m_service_number != 0;
                 }
 #endif
-
-                auto routine_address = c_export( m_syscall_name_hash );
+                c_export address{ m_syscall_name_hash };
+                if ( address == 0 ) {
+                    m_last_error.emplace( errc::export_not_found );
+                    return false;
+                }
 
 #if SHADOWSYSCALLS_CACHING
-                cache.try_emplace( m_syscall_name_hash, routine_address );
+                cache.try_emplace( m_syscall_name_hash, address );
 #endif
-
-                m_syscall_index = parse_syscall_id( routine_address );
+                m_service_number = get_ssn_from_address( address );
+                return m_service_number != 0;
             }
 
             // Syscall ID is at an offset of 4 bytes from the specified address.
-            std::uint32_t parse_syscall_id( std::uintptr_t export_address ) const {
-                return *reinterpret_cast< std::uint32_t* >( static_cast< std::uintptr_t >( export_address + 4 ) );
+            // \note Not considering the situation when EDR hook is installed
+            // Learn more here: https://github.com/annihilatorq/shadow_syscall/issues/1
+            std::uint32_t get_ssn_from_address( std::uintptr_t export_address ) {
+                auto address = reinterpret_cast< std::uint8_t* >( export_address );
+                for ( auto i = 0; i < 64; ++i ) {
+                    if ( address[ i ] == 0x4c && address[ i + 1 ] == 0x8b && address[ i + 2 ] == 0xd1 &&
+                        address[ i + 3 ] == 0xb8 && address[ i + 6 ] == 0x00 && address[ i + 7 ] == 0x00 ) {
+                        return *reinterpret_cast< std::uint32_t* >( &address[ i + 4 ] );
+                    }
+                }
+
+                m_last_error.emplace( errc::ssn_not_found );
+                return 0;
             }
 
         private:
             hash_t::value_t m_syscall_name_hash;
-            std::uint32_t m_syscall_index;
-
+            std::uint32_t m_service_number;
+            std::optional<errc> m_last_error;
             c_shellcode<13> m_shellcode =
             {
                 0x49, 0x89, 0xCA,                           // mov r10, rcx
-                0x48, 0xC7, 0xC0, 0x3F, 0x10, 0x00, 0x00,   // mov rax, syscall_index
+                0x48, 0xC7, 0xC0, 0x3F, 0x10, 0x00, 0x00,   // mov rax, ssn
                 0x0F, 0x05,                                 // syscall
                 0xC3                                        // ret
             };
         };
 
 
-        template<typename ReturnType>
+        template<typename Ty>
         class c_importer
         {
         public:
@@ -1248,12 +1284,12 @@ namespace shadow
             {}
 
             template<typename... Args>
-            ReturnType call( Args... args ) noexcept
+            Ty call( Args... args ) noexcept
             {
                 if ( m_export_address == 0 )
-                    return ReturnType{};
+                    return Ty{};
 
-                return reinterpret_cast< ReturnType( __stdcall* )( Args... ) >( m_export_address )( args... );
+                return reinterpret_cast< Ty( __stdcall* )( Args... ) >( m_export_address )( args... );
             }
 
         private:
@@ -1312,28 +1348,28 @@ struct std::hash<shadow::hash_t> {
     }
 };
 
-template<typename ReturnType, class... Args>
-inline ReturnType shadowsyscall( shadow::hash_t syscall_name, Args&&... args )
+template<typename Ty, class... Args>
+inline shadow::syscalls::call_result_t<Ty, shadow::errc> shadowsyscall( shadow::hash_t syscall_name, Args&&... args )
 {
-    static_assert( ( shadow::is_arch_x64 && !std::is_same_v<ReturnType, std::monostate> ),
+    static_assert( ( shadow::is_arch_x64 && !std::is_same_v<Ty, std::monostate> ),
           "shadowsyscall is not supported on the x86 architecture" );
-
-    shadow::syscalls::c_syscall<ReturnType> syscall{ syscall_name };
-    return syscall.call( shadow::syscalls::convert_nulls_to_nullptrs( args ) ... );
+    shadow::syscalls::c_syscall<Ty> syscall{ syscall_name };
+    auto result = syscall.call( shadow::syscalls::convert_nulls_to_nullptrs( args ) ... );
+    return { result, syscall.get_last_error() };
 }
 
-template<typename ReturnType, class... Args>
-inline ReturnType shadowcall( shadow::hash_t export_name, Args&&... args )
+template<typename Ty, class... Args>
+inline Ty shadowcall( shadow::hash_t export_name, Args&&... args )
 {
-    shadow::syscalls::c_importer<ReturnType> importer{ export_name };
+    shadow::syscalls::c_importer<Ty> importer{ export_name };
     return importer.call( shadow::syscalls::convert_nulls_to_nullptrs( args ) ... );
 }
 
-template<typename ReturnType, class... Args>
-inline ReturnType shadowcall( shadow::hashpair export_and_module_names, Args&&... args )
+template<typename Ty, class... Args>
+inline Ty shadowcall( shadow::hashpair export_and_module_names, Args&&... args )
 {
     const auto& [export_name, module_name] = export_and_module_names;
-    shadow::syscalls::c_importer<ReturnType> importer{ export_name, module_name };
+    shadow::syscalls::c_importer<Ty> importer{ export_name, module_name };
     return importer.call( shadow::syscalls::convert_nulls_to_nullptrs( args ) ... );
 }
 
