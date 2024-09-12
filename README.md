@@ -191,8 +191,8 @@ int main() {
 - Execute any export at runtime
 - Doesn't leave any imports in the executable
 
-## 📜 What's a syscall?
-![syscalls](https://github.com/user-attachments/assets/02093511-7502-42f3-bf5d-1b3dd8ca5457)
+## 📜 What is a syscall in Windows?
+![syscalls](https://github.com/user-attachments/assets/1719c073-669b-4e6b-b2ec-23850ba91dbc)
 
 ## Thanks to
 invers1on :heart:
