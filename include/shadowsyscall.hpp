@@ -1059,7 +1059,7 @@ namespace shadow {
                 // will be a "tail" of remaining bytes, collect them.
                 total_sum += append_tail( data, pos );
 
-                return total_sum;
+                return total_sum * 58998238934ull;
             }
 
         private:
@@ -1080,11 +1080,7 @@ namespace shadow {
                 alignas( 16 ) int16_t temp[8];
                 _mm_storeu_si128( reinterpret_cast<vector128_t*>( temp ), sum );
 
-                Ty total_sum = 0;
-                for ( auto j = 0; j < 8; ++j )
-                    total_sum += temp[j];
-
-                return total_sum;
+                return std::accumulate( std::begin( temp ), std::end( temp ), Ty{ 0 } );
             }
 
             Ty append_tail( const std::span<const char> data, std::size_t pos ) const {
