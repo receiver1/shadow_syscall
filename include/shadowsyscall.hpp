@@ -10,9 +10,7 @@
 #ifndef SHADOWSYSCALL_HPP
 #define SHADOWSYSCALL_HPP
 
-#define SHADOWSYSCALLS_CACHING true
-
-#if SHADOWSYSCALLS_CACHING
+#ifndef SHADOWSYSCALLS_DISABLE_CACHING
     #include <mutex>
     #include <shared_mutex>
     #include <unordered_map>
@@ -22,29 +20,36 @@
 #include <array>
 #include <chrono>
 #include <cstdint>
-#include <cstring>
 #include <filesystem>
 #include <functional>
 #include <intrin.h>
 #include <iostream>
+#include <numeric>
 #include <optional>
+#include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
 #include <variant>
 
 namespace shadow {
-    static constexpr bool is_arch_x64 = sizeof( std::nullptr_t ) == 8;
+
+    [[maybe_unused]] constexpr auto bitness = std::numeric_limits<uintptr_t>::digits;
+    [[maybe_unused]] constexpr auto is_x64 = bitness == 64;
+    [[maybe_unused]] constexpr auto is_x32 = bitness == 64;
 
     class address_t {
     public:
+        template <typename Ty>
+        struct is_fundamental_or_pointer : std::bool_constant<std::is_pointer_v<Ty> || std::is_fundamental_v<Ty>> { };
+
         using underlying_t = std::uintptr_t;
 
         constexpr address_t() = default;
         constexpr address_t( underlying_t address ) noexcept: m_address( address ) { }
 
         template <typename Ty>
-            requires std::is_pointer_v<Ty>
+            requires( std::is_pointer_v<Ty> )
         constexpr address_t( Ty address ) noexcept: m_address( reinterpret_cast<underlying_t>( address ) ) { }
 
         address_t( const address_t& instance ) = default;
@@ -79,6 +84,7 @@ namespace shadow {
         }
 
         template <typename Ty, typename... Args>
+            requires( std::conjunction_v<is_fundamental_or_pointer<Args>...> )
         [[nodiscard]] Ty execute( Args... args ) const noexcept {
             if ( m_address == 0 )
                 return Ty{};
@@ -92,11 +98,6 @@ namespace shadow {
 
         constexpr explicit operator bool() const noexcept {
             return static_cast<bool>( m_address );
-        }
-
-        constexpr address_t& operator=( underlying_t address ) {
-            m_address = address;
-            return *this;
         }
 
         constexpr auto operator<=>( const address_t& ) const = default;
@@ -132,34 +133,91 @@ namespace shadow {
         struct section_string_t {
             char short_name[8];
 
-            std::string_view to_string() {
-                return std::string_view{ short_name };
-            }
-            const std::string_view to_string() const {
+            [[nodiscard]] auto view() const noexcept {
                 return std::string_view{ short_name };
             }
 
-            explicit operator std::string_view() const {
-                return to_string();
+            explicit operator std::string_view() const noexcept {
+                return view();
             }
 
-            char operator[]( size_t n ) const {
-                return to_string()[n];
+            [[nodiscard]] auto operator[]( size_t n ) const noexcept {
+                return view()[n];
             }
 
-            bool operator==( const section_string_t& other ) const {
-                return to_string() == other.to_string();
+            auto operator==( const section_string_t& other ) const {
+                return view().compare( other.view() ) == 0;
             }
         };
 
         struct unicode_string {
-            std::uint16_t length;
-            std::uint16_t maximum_length;
-            wchar_t* buffer;
+            using char_t = wchar_t;
+            using pointer_t = char_t*;
 
-            auto to_wstring() const noexcept {
-                return std::wstring_view{ buffer };
+        public:
+            constexpr unicode_string() = default;
+            constexpr unicode_string( const std::uint16_t length, const std::uint16_t max_length, pointer_t buffer ) noexcept
+                : m_length( length ), m_max_length( max_length ), m_buffer( buffer ) { }
+
+            unicode_string( const unicode_string& instance ) = default;
+            unicode_string( unicode_string&& instance ) = default;
+            unicode_string& operator=( const unicode_string& instance ) = default;
+            unicode_string& operator=( unicode_string&& instance ) = default;
+            ~unicode_string() = default;
+
+            template <typename Ty>
+                requires( std::is_constructible_v<Ty, pointer_t> )
+            [[nodiscard]] auto as() const noexcept( std::is_nothrow_constructible_v<Ty, pointer_t> ) {
+                return Ty{ m_buffer };
             }
+
+            [[nodiscard]] auto to_path( std::filesystem::path::format fmt = std::filesystem::path::auto_format ) const {
+                return std::filesystem::path{ m_buffer, fmt };
+            }
+
+            [[nodiscard]] auto view() const noexcept {
+                return std::wstring_view{ m_buffer };
+            }
+
+            [[nodiscard]] auto string() const {
+                // \note: Since std::codecvt & std::wstring_convert is
+                // deprecated in cpp17 and will be deleted in
+                // cpp26, we use the std::filesystem::path
+                // as a string converter, although it will
+                // require more memory, we will be sure
+                // that the conversion will be correct.
+                // We will not use wcstombs_s because of the
+                // dependency on the current locale.
+
+                const auto src = view();
+                const auto is_non_ascii = contains_non_ascii( src );
+                if ( is_non_ascii ) {
+                    // Use std::filesystem::path as string converter
+                    return to_path().string();
+                } else {
+                    // Otherwise, return string_view converted to std::string
+                    return std::string( src.begin(), src.end() );
+                }
+            }
+
+            [[nodiscard]] auto data() const noexcept {
+                return m_buffer;
+            }
+
+            [[nodiscard]] auto size() const noexcept {
+                return m_length;
+            }
+
+        private:
+            [[nodiscard]] bool contains_non_ascii( const std::wstring_view str ) const noexcept {
+                return std::ranges::any_of( str, []( wchar_t ch ) {
+                    return ch > 127; // characters out of ASCII range
+                } );
+            }
+
+            std::uint16_t m_length{ 0 };
+            std::uint16_t m_max_length{ 0 };
+            pointer_t     m_buffer{ nullptr };
         };
 
         struct list_entry {
@@ -188,16 +246,16 @@ namespace shadow {
         };
 
         struct data_directory_t {
-            std::uint32_t rva;
-            std::uint32_t size;
+            std::uint32_t      rva;
+            std::uint32_t      size;
             [[nodiscard]] bool present() const noexcept {
                 return size > 0;
             }
         };
 
         struct raw_data_directory_t {
-            uint32_t ptr_raw_data;
-            uint32_t size;
+            uint32_t           ptr_raw_data;
+            uint32_t           size;
             [[nodiscard]] bool present() const noexcept {
                 return size > 0;
             }
@@ -206,22 +264,22 @@ namespace shadow {
         struct data_directories_x64_t {
             union {
                 struct {
-                    data_directory_t export_directory;
-                    data_directory_t import_directory;
-                    data_directory_t resource_directory;
-                    data_directory_t exception_directory;
+                    data_directory_t     export_directory;
+                    data_directory_t     import_directory;
+                    data_directory_t     resource_directory;
+                    data_directory_t     exception_directory;
                     raw_data_directory_t security_directory; // File offset instead of RVA!
-                    data_directory_t basereloc_directory;
-                    data_directory_t debug_directory;
-                    data_directory_t architecture_directory;
-                    data_directory_t globalptr_directory;
-                    data_directory_t tls_directory;
-                    data_directory_t load_config_directory;
-                    data_directory_t bound_import_directory;
-                    data_directory_t iat_directory;
-                    data_directory_t delay_import_directory;
-                    data_directory_t com_descriptor_directory;
-                    data_directory_t _reserved0;
+                    data_directory_t     basereloc_directory;
+                    data_directory_t     debug_directory;
+                    data_directory_t     architecture_directory;
+                    data_directory_t     globalptr_directory;
+                    data_directory_t     tls_directory;
+                    data_directory_t     load_config_directory;
+                    data_directory_t     bound_import_directory;
+                    data_directory_t     iat_directory;
+                    data_directory_t     delay_import_directory;
+                    data_directory_t     com_descriptor_directory;
+                    data_directory_t     _reserved0;
                 };
                 data_directory_t entries[NUM_DATA_DIRECTORIES];
             };
@@ -230,38 +288,38 @@ namespace shadow {
         struct data_directories_x86_t {
             union {
                 struct {
-                    data_directory_t export_directory;
-                    data_directory_t import_directory;
-                    data_directory_t resource_directory;
-                    data_directory_t exception_directory;
+                    data_directory_t     export_directory;
+                    data_directory_t     import_directory;
+                    data_directory_t     resource_directory;
+                    data_directory_t     exception_directory;
                     raw_data_directory_t security_directory; // File offset instead of RVA!
-                    data_directory_t basereloc_directory;
-                    data_directory_t debug_directory;
-                    data_directory_t copyright_directory;
-                    data_directory_t globalptr_directory;
-                    data_directory_t tls_directory;
-                    data_directory_t load_config_directory;
-                    data_directory_t bound_import_directory;
-                    data_directory_t iat_directory;
-                    data_directory_t delay_import_directory;
-                    data_directory_t com_descriptor_directory;
-                    data_directory_t _reserved0;
+                    data_directory_t     basereloc_directory;
+                    data_directory_t     debug_directory;
+                    data_directory_t     copyright_directory;
+                    data_directory_t     globalptr_directory;
+                    data_directory_t     tls_directory;
+                    data_directory_t     load_config_directory;
+                    data_directory_t     bound_import_directory;
+                    data_directory_t     iat_directory;
+                    data_directory_t     delay_import_directory;
+                    data_directory_t     com_descriptor_directory;
+                    data_directory_t     _reserved0;
                 };
                 data_directory_t entries[NUM_DATA_DIRECTORIES];
             };
         };
 
         struct export_directory_t {
-            uint32_t characteristics;
-            uint32_t timedate_stamp;
+            uint32_t  characteristics;
+            uint32_t  timedate_stamp;
             version_t version;
-            uint32_t name;
-            uint32_t base;
-            uint32_t num_functions;
-            uint32_t num_names;
-            uint32_t rva_functions;
-            uint32_t rva_names;
-            uint32_t rva_name_ordinals;
+            uint32_t  name;
+            uint32_t  base;
+            uint32_t  num_functions;
+            uint32_t  num_names;
+            uint32_t  rva_functions;
+            uint32_t  rva_names;
+            uint32_t  rva_name_ordinals;
 
             [[nodiscard]] auto rva_table( std::uintptr_t base_address ) const {
                 return reinterpret_cast<std::uint32_t*>( base_address + rva_functions );
@@ -291,17 +349,17 @@ namespace shadow {
         };
 
         struct loader_table_entry {
-            list_entry in_load_order_links;
-            list_entry in_memory_order_links;
+            list_entry     in_load_order_links;
+            list_entry     in_memory_order_links;
             std::nullptr_t reserved[2];
-            address_t base_address;
-            address_t entry_point;
+            address_t      base_address;
+            address_t      entry_point;
             std::nullptr_t reserved2;
             unicode_string path;
             unicode_string name;
             std::nullptr_t reserved3[3];
             union {
-                std::uint32_t check_sum;
+                std::uint32_t  check_sum;
                 std::nullptr_t reserved4;
             };
             std::uint32_t time_date_stamp;
@@ -309,18 +367,18 @@ namespace shadow {
 
         struct module_loader_data {
             std::uint32_t length;
-            std::uint8_t initialized;
-            void* ss_handle;
-            list_entry in_load_order_module_list;
-            list_entry in_memory_order_module_list;
-            list_entry in_initialization_order_module_list;
+            std::uint8_t  initialized;
+            void*         ss_handle;
+            list_entry    in_load_order_module_list;
+            list_entry    in_memory_order_module_list;
+            list_entry    in_initialization_order_module_list;
         };
 
         struct PEB {
-            uint8_t reserved1[2];
-            uint8_t being_debugged;
-            uint8_t reserved2[1];
-            std::nullptr_t reserved3[2];
+            uint8_t             reserved1[2];
+            uint8_t             being_debugged;
+            uint8_t             reserved2[1];
+            std::nullptr_t      reserved3[2];
             module_loader_data* ldr_data;
 
             static auto address() noexcept {
@@ -369,82 +427,62 @@ namespace shadow {
 
         struct optional_header_x64_t {
             // Standard fields.
-            uint16_t magic;
-            version_t linker_version;
-
-            uint32_t size_code;
-            uint32_t size_init_data;
-            uint32_t size_uninit_data;
-
-            uint32_t entry_point;
-            uint32_t base_of_code;
-
-            // NT additional fields.
-            uint64_t image_base;
-            uint32_t section_alignment;
-            uint32_t file_alignment;
-
-            ex_version_t os_version;
-            ex_version_t img_version;
-            ex_version_t subsystem_version;
-            uint32_t win32_version_value;
-
-            uint32_t size_image;
-            uint32_t size_headers;
-
-            uint32_t checksum;
-            subsystem_id subsystem;
-            uint16_t characteristics;
-
-            uint64_t size_stack_reserve;
-            uint64_t size_stack_commit;
-            uint64_t size_heap_reserve;
-            uint64_t size_heap_commit;
-
-            uint32_t ldr_flags;
-
-            uint32_t num_data_directories;
+            uint16_t               magic;
+            version_t              linker_version;
+            uint32_t               size_code;
+            uint32_t               size_init_data;
+            uint32_t               size_uninit_data;
+            uint32_t               entry_point;
+            uint32_t               base_of_code;
+            uint64_t               image_base;
+            uint32_t               section_alignment;
+            uint32_t               file_alignment;
+            ex_version_t           os_version;
+            ex_version_t           img_version;
+            ex_version_t           subsystem_version;
+            uint32_t               win32_version_value;
+            uint32_t               size_image;
+            uint32_t               size_headers;
+            uint32_t               checksum;
+            subsystem_id           subsystem;
+            uint16_t               characteristics;
+            uint64_t               size_stack_reserve;
+            uint64_t               size_stack_commit;
+            uint64_t               size_heap_reserve;
+            uint64_t               size_heap_commit;
+            uint32_t               ldr_flags;
+            uint32_t               num_data_directories;
             data_directories_x64_t data_directories;
         };
 
         struct optional_header_x86_t {
             // Standard fields.
-            uint16_t magic;
-            version_t linker_version;
-
-            uint32_t size_code;
-            uint32_t size_init_data;
-            uint32_t size_uninit_data;
-
-            uint32_t entry_point;
-            uint32_t base_of_code;
-            uint32_t base_of_data;
-
-            // NT additional fields.
-            uint32_t image_base;
-            uint32_t section_alignment;
-            uint32_t file_alignment;
-
-            ex_version_t os_version;
-            ex_version_t img_version;
-            ex_version_t subsystem_version;
-            uint32_t win32_version_value;
-
-            uint32_t size_image;
-            uint32_t size_headers;
-
-            uint32_t checksum;
-            subsystem_id subsystem;
-            uint16_t characteristics;
-
-            uint32_t size_stack_reserve;
-            uint32_t size_stack_commit;
-            uint32_t size_heap_reserve;
-            uint32_t size_heap_commit;
-
-            uint32_t ldr_flags;
-
-            uint32_t num_data_directories;
+            uint16_t               magic;
+            version_t              linker_version;
+            uint32_t               size_code;
+            uint32_t               size_init_data;
+            uint32_t               size_uninit_data;
+            uint32_t               entry_point;
+            uint32_t               base_of_code;
+            uint32_t               base_of_data;
+            uint32_t               image_base;
+            uint32_t               section_alignment;
+            uint32_t               file_alignment;
+            ex_version_t           os_version;
+            ex_version_t           img_version;
+            ex_version_t           subsystem_version;
+            uint32_t               win32_version_value;
+            uint32_t               size_image;
+            uint32_t               size_headers;
+            uint32_t               checksum;
+            subsystem_id           subsystem;
+            uint16_t               characteristics;
+            uint32_t               size_stack_reserve;
+            uint32_t               size_stack_commit;
+            uint32_t               size_heap_reserve;
+            uint32_t               size_heap_commit;
+            uint32_t               ldr_flags;
+            uint32_t               num_data_directories;
             data_directories_x86_t data_directories;
 
             inline bool has_directory( const data_directory_t* dir ) const {
@@ -456,14 +494,12 @@ namespace shadow {
             }
         };
 
-        template <bool x64 = is_arch_x64>
-        using optional_header_t = std::conditional_t<x64, optional_header_x64_t, optional_header_x86_t>;
+        using optional_header_t = std::conditional_t<is_x64, optional_header_x64_t, optional_header_x86_t>;
 
-        template <bool x64 = is_arch_x64>
         struct nt_headers_t {
-            uint32_t signature;
-            file_header_t file_header;
-            optional_header_t<x64> optional_header;
+            uint32_t          signature;
+            file_header_t     file_header;
+            optional_header_t optional_header;
 
             // Section getters
             inline section_header_t* get_sections() {
@@ -482,9 +518,9 @@ namespace shadow {
             // Section iterator
             template <typename T>
             struct proxy {
-                T* base;
+                T*       base;
                 uint16_t count;
-                T* begin() const {
+                T*       begin() const {
                     return base;
                 }
                 T* end() const {
@@ -498,9 +534,6 @@ namespace shadow {
                 return { get_sections(), file_header.num_sections };
             }
         };
-
-        using nt_headers_x64_t = nt_headers_t<true>;
-        using nt_headers_x86_t = nt_headers_t<false>;
 
         struct dos_header_t {
             uint16_t e_magic;
@@ -524,18 +557,16 @@ namespace shadow {
             uint32_t e_lfanew;
 
             inline file_header_t* get_file_header() {
-                return &get_nt_headers<>()->file_header;
+                return &get_nt_headers()->file_header;
             }
             inline const file_header_t* get_file_header() const {
-                return &get_nt_headers<>()->file_header;
+                return &get_nt_headers()->file_header;
             }
-            template <bool x64 = is_arch_x64>
-            inline nt_headers_t<x64>* get_nt_headers() {
-                return ( nt_headers_t<x64>* )( ( uint8_t* )this + e_lfanew );
+            inline nt_headers_t* get_nt_headers() {
+                return ( nt_headers_t* )( ( uint8_t* )this + e_lfanew );
             }
-            template <bool x64 = is_arch_x64>
-            inline const nt_headers_t<x64>* get_nt_headers() const {
-                return const_cast<dos_header_t*>( this )->template get_nt_headers<x64>();
+            inline const nt_headers_t* get_nt_headers() const {
+                return const_cast<dos_header_t*>( this )->get_nt_headers();
             }
         };
 
@@ -555,16 +586,16 @@ namespace shadow {
             inline const file_header_t* get_file_header() const {
                 return dos_header.get_file_header();
             }
-            inline nt_headers_t<is_arch_x64>* get_nt_headers() {
-                return dos_header.get_nt_headers<is_arch_x64>();
+            inline nt_headers_t* get_nt_headers() {
+                return dos_header.get_nt_headers();
             }
-            inline const nt_headers_t<is_arch_x64>* get_nt_headers() const {
-                return dos_header.get_nt_headers<is_arch_x64>();
+            inline const nt_headers_t* get_nt_headers() const {
+                return dos_header.get_nt_headers();
             }
-            inline optional_header_t<is_arch_x64>* get_optional_header() {
+            inline optional_header_t* get_optional_header() {
                 return &get_nt_headers()->optional_header;
             }
-            inline const optional_header_t<is_arch_x64>* get_optional_header() const {
+            inline const optional_header_t* get_optional_header() const {
                 return &get_nt_headers()->optional_header;
             }
 
@@ -630,21 +661,211 @@ namespace shadow {
             return image_from_base( module->base_address.as<address_t>() );
         }
 
-        struct module_t {
-            std::uintptr_t base_address{ 0 };
-            std::uintptr_t ep_address{ 0 };
-            image_t* image{ nullptr };
-
-            [[nodiscard]] bool is_invalid() const {
-                return base_address == 0 || ep_address == 0 || image == nullptr;
-            }
-        };
-
         template <typename T, typename FieldT>
         constexpr T* containing_record( FieldT* address, FieldT T::*field ) {
             auto offset = reinterpret_cast<std::uintptr_t>( &( reinterpret_cast<T*>( 0 )->*field ) );
             return reinterpret_cast<T*>( reinterpret_cast<std::uintptr_t>( address ) - offset );
         }
+
+        struct kernel_system_time {
+            uint32_t low_part;
+            int32_t  high1_time;
+            int32_t  high2_time;
+        };
+
+        enum nt_product_type {
+            win_nt = 1,
+            lan_man_nt = 2,
+            server = 3
+        };
+
+        enum alternative_arch_type {
+            standart_design,
+            nec98x86,
+            end_alternatives
+        };
+
+        struct xstate_feature {
+            uint32_t offset;
+            uint32_t size;
+        };
+
+        struct xstate_configuration {
+            // Mask of all enabled features
+            uint64_t enabled_features;
+            // Mask of volatile enabled features
+            uint64_t enabled_volatile_features;
+            // Total size of the save area for user states
+            uint32_t size;
+            // Control Flags
+            union {
+                uint32_t control_flags;
+                struct {
+                    uint32_t optimized_save:1;
+                    uint32_t compaction_enabled:1;
+                    uint32_t extended_feature_disable:1;
+                };
+            };
+            // List of features
+            xstate_feature features[64];
+            // Mask of all supervisor features
+            uint64_t enabled_supervisor_features;
+            // Mask of features that require start address to be 64 byte aligned
+            uint64_t aligned_features;
+            // Total size of the save area for user and supervisor states
+            uint32_t all_features_size;
+            // List which holds size of each user and supervisor state supported by CPU
+            uint32_t all_features[64];
+            // Mask of all supervisor features that are exposed to user-mode
+            uint64_t enabled_user_visible_supervisor_features;
+            // Mask of features that can be disabled via XFD
+            uint64_t extended_feature_disable_features;
+            // Total size of the save area for non-large user and supervisor states
+            uint32_t all_non_large_feature_size;
+            uint32_t spare;
+        };
+
+        union win32_large_integer {
+            struct {
+                uint32_t low_part;
+                int32_t  high_part;
+            };
+            struct {
+                uint32_t low_part;
+                int32_t  high_part;
+            } u;
+            uint64_t quad_part;
+        };
+
+        struct kernel_user_shared_data {
+            uint32_t              tick_count_low_deprecated;
+            uint32_t              tick_count_multiplier;
+            kernel_system_time    interrupt_time;
+            kernel_system_time    system_time;
+            kernel_system_time    time_zone_bias;
+            uint16_t              image_number_low;
+            uint16_t              image_number_high;
+            wchar_t               nt_system_root[260];
+            uint32_t              max_stack_trace_depth;
+            uint32_t              crypto_exponent;
+            uint32_t              time_zone_id;
+            uint32_t              large_page_minimum;
+            uint32_t              ait_sampling_value;
+            uint32_t              app_compat_flag;
+            uint64_t              random_seed_version;
+            uint32_t              global_validation_runlevel;
+            int32_t               time_zone_bias_stamp;
+            uint32_t              nt_build_number;
+            nt_product_type       nt_product_type;
+            bool                  product_type_is_valid;
+            bool                  reserved0[1];
+            uint16_t              native_processor_architecture;
+            uint32_t              nt_major_version;
+            uint32_t              nt_minor_version;
+            bool                  processor_features[64];
+            uint32_t              reserved1;
+            uint32_t              reserved3;
+            uint32_t              time_slip;
+            alternative_arch_type alternative_arch;
+            uint32_t              boot_id;
+            win32_large_integer   system_expiration_date;
+            uint32_t              suite_mask;
+            bool                  kernel_debugger_enabled;
+            union {
+                uint8_t mitigation_policies;
+                struct {
+                    uint8_t nx_support_policy:2;
+                    uint8_t seh_validation_policy:2;
+                    uint8_t cur_dir_devices_skipped_for_dlls:2;
+                    uint8_t reserved:2;
+                };
+            };
+            uint16_t cycles_per_yield;
+            uint32_t active_console_id;
+            uint32_t dismount_count;
+            uint32_t com_plus_package;
+            uint32_t last_system_rit_event_tick_count;
+            uint32_t number_of_physical_pages;
+            bool     safe_boot_mode;
+            union {
+                uint8_t virtualization_flags;
+                struct {
+                    uint8_t arch_started_in_el2:1;
+                    uint8_t qc_sl_is_supported:1;
+                };
+            };
+            uint8_t reserved12[2];
+            union {
+                uint32_t shared_data_flags;
+                struct {
+                    uint32_t dbg_error_port_present:1;
+                    uint32_t dbg_elevation_enabled:1;
+                    uint32_t dbg_virt_enabled:1;
+                    uint32_t dbg_installer_detect_enabled:1;
+                    uint32_t dbg_lkg_enabled:1;
+                    uint32_t dbg_dyn_processor_enabled:1;
+                    uint32_t dbg_console_broker_enabled:1;
+                    uint32_t dbg_secure_boot_enabled:1;
+                    uint32_t dbg_multi_session_sku:1;
+                    uint32_t dbg_multi_users_in_session_sku:1;
+                    uint32_t dbg_state_separation_enabled:1;
+                    uint32_t spare_bits:21;
+                };
+            };
+            uint32_t data_flags_pad[1];
+            uint64_t test_ret_instruction;
+            int64_t  qpc_frequency;
+            uint32_t system_call;
+            uint32_t reserved2;
+            uint64_t full_number_of_physical_pages;
+            uint64_t system_call_pad[1];
+            union {
+                kernel_system_time tick_count;
+                uint64_t           tick_count_quad;
+                struct {
+                    uint32_t reserved_tick_count_overlay[3];
+                    uint32_t tick_count_pad[1];
+                };
+            };
+            uint32_t cookie;
+            uint32_t cookie_pad[1];
+            int64_t  console_session_foreground_process_id;
+            uint64_t time_update_lock;
+            uint64_t baseline_system_time_qpc;
+            uint64_t baseline_interrupt_time_qpc;
+            uint64_t qpc_system_time_increment;
+            uint64_t qpc_interrupt_time_increment;
+            uint8_t  qpc_system_time_increment_shift;
+            uint8_t  qpc_interrupt_time_increment_shift;
+            uint16_t unparked_processor_count;
+            uint32_t enclave_feature_mask[4];
+            uint32_t telemetry_coverage_round;
+            uint16_t user_mode_global_logger[16];
+            uint32_t image_file_execution_options;
+            uint32_t lang_generation_count;
+            uint64_t reserved4;
+            uint64_t interrupt_time_bias;
+            uint64_t qpc_bias;
+            uint32_t active_processor_count;
+            uint8_t  active_group_count;
+            uint8_t  reserved9;
+            union {
+                uint16_t qpc_data;
+                struct {
+                    uint8_t qpc_bypass_enabled;
+                    uint8_t qpc_reserved;
+                };
+            };
+            win32_large_integer  time_zone_bias_effective_start;
+            win32_large_integer  time_zone_bias_effective_end;
+            xstate_configuration xstate;
+            kernel_system_time   feature_configuration_change_stamp;
+            uint32_t             spare;
+            uint64_t             user_pointer_auth_mask;
+            xstate_configuration xstate_arm64;
+            uint32_t             reserved10[210];
+        };
+
     } // namespace win
 
     namespace detail {
@@ -661,7 +882,7 @@ namespace shadow {
             stack_function() = default;
 
             template <typename F, typename DecayedF = std::decay_t<F>>
-                requires std::is_invocable_r_v<Ret, F, Args...>
+                requires( std::is_invocable_r_v<Ret, F, Args...> )
             stack_function( F&& func ) {
                 static_assert( sizeof( DecayedF ) <= sizeof( m_storage ), "Function object too large" );
 
@@ -706,7 +927,7 @@ namespace shadow {
 
         private:
             alignas( void* ) std::byte m_storage[32];
-            function_ptr_t m_invoker{ nullptr };
+            function_ptr_t   m_invoker{ nullptr };
             destructor_ptr_t m_destroyer{ nullptr };
         };
 
@@ -737,7 +958,7 @@ namespace shadow {
         class basic_hash {
         public:
             using underlying_t = ValTy;
-            static constexpr bool case_sensitive = false;
+            static constexpr bool  case_sensitive = false;
             static constexpr ValTy FNV_prime = ( sizeof( ValTy ) == 4 ) ? 16777619u : 1099511628211ull;
 
         public:
@@ -803,6 +1024,76 @@ namespace shadow {
         using hash32_t = detail::basic_hash<uint32_t>;
         using hash64_t = detail::basic_hash<uint64_t>;
 
+        // \note: Some useful benchmarks to understand the
+        // difference in the bytewise vs collection rate
+        // using SSE intrinsics, benched using 2MB span:
+        // [MSVC]
+        // BM_SumBytesBasic     792456 ns       802176 ns
+        // BM_SumBytesSSE        85171 ns        85794 ns
+        // [CLANG]
+        // BM_SumBytesBasic     381638 ns       383650 ns
+        // BM_SumBytesSSE        98902 ns        97656 ns
+
+        template <std::integral Ty = std::size_t>
+        class memory_checksum {
+            using vector128_t = __m128i;
+
+        public:
+            [[nodiscard]] Ty compute( const std::span<const char> data ) const {
+                const auto  size = data.size();
+                auto        sum = _mm_setzero_si128();
+                std::size_t pos = 0;
+
+                // The main feature of vectorized byte collection is
+                // that we do not iterate each byte separately, but
+                // load 16 bytes in one iteration, respectively, the
+                // number of iterations is reduced by 16 times.
+
+                for ( ; pos + 16 <= size; pos += 16 )
+                    process_block( data, pos, sum );
+
+                // Just sum up all 16-bit words from the "sum"
+                Ty total_sum = sum_16bit_words( sum );
+
+                // If the sum of bytes is not a multiple of 16, there
+                // will be a "tail" of remaining bytes, collect them.
+                total_sum += append_tail( data, pos );
+
+                return total_sum;
+            }
+
+        private:
+            void process_block( const std::span<const char> data, std::size_t pos, vector128_t& sum ) const {
+                // Load 16 bytes in one-go
+                auto block = _mm_loadu_si128( reinterpret_cast<const vector128_t*>( &data[pos] ) );
+
+                // We will not use '_mm_cvtepi8_epi16' in order
+                // not to switch from SSE2 to SSE 4.1
+                auto low_eight_bytes = _mm_unpacklo_epi8( block, _mm_setzero_si128() );
+                auto high_eight_bytes = _mm_unpackhi_epi8( block, _mm_setzero_si128() );
+
+                sum = _mm_add_epi16( sum, low_eight_bytes );
+                sum = _mm_add_epi16( sum, high_eight_bytes );
+            }
+
+            Ty sum_16bit_words( const vector128_t& sum ) const {
+                alignas( 16 ) int16_t temp[8];
+                _mm_storeu_si128( reinterpret_cast<vector128_t*>( temp ), sum );
+
+                Ty total_sum = 0;
+                for ( auto j = 0; j < 8; ++j )
+                    total_sum += temp[j];
+
+                return total_sum;
+            }
+
+            Ty append_tail( const std::span<const char> data, std::size_t pos ) const {
+                return std::reduce( data.begin() + pos, data.end(), 0ull, []( Ty acc, char byte ) {
+                    return acc + static_cast<unsigned char>( byte );
+                } );
+            }
+        };
+
         class export_enumerator {
         public:
             explicit export_enumerator( address_t base ) noexcept: m_module_base( base ), m_export_table( get_export_directory( base ) ) { }
@@ -844,7 +1135,7 @@ namespace shadow {
                 using pointer = value_type*;
                 using reference = value_type&;
 
-                iterator(): m_exports( nullptr ), m_index( 0 ), m_value( {} ){};
+                iterator(): m_exports( nullptr ), m_index( 0 ), m_value( {} ) {};
                 ~iterator() = default;
                 iterator( const iterator& ) = default;
                 iterator( iterator&& ) = default;
@@ -923,8 +1214,8 @@ namespace shadow {
                 }
 
                 const export_enumerator* m_exports;
-                std::size_t m_index;
-                mutable value_type m_value;
+                std::size_t              m_index;
+                mutable value_type       m_value;
             };
 
             // Make sure the iterator is compatible with std::ranges
@@ -967,7 +1258,7 @@ namespace shadow {
                 return m_module_base.offset<win::export_directory_t*>( export_data_dir.rva );
             }
 
-            address_t m_module_base;
+            address_t                m_module_base;
             win::export_directory_t* m_export_table{ nullptr };
         };
 
@@ -1013,17 +1304,29 @@ namespace shadow {
 
             // \return Name of current DLL as std::wstring_view
             [[nodiscard]] auto name() const noexcept {
-                return m_data == nullptr ? std::wstring_view{} : m_data->name.to_wstring();
+                return m_data == nullptr ? win::unicode_string{} : m_data->name;
             }
 
             // \return Filepath to current DLL as std::wstring_view
             [[nodiscard]] auto filepath() const noexcept {
-                return m_data == nullptr ? std::wstring_view{} : m_data->path.to_wstring();
+                return m_data == nullptr ? win::unicode_string{} : m_data->path;
             }
 
             // \return Exports range-enumerator of current DLL
             [[nodiscard]] auto exports() const noexcept {
                 return export_enumerator{ m_data->base_address };
+            }
+
+            template <std::integral Ty = std::size_t>
+            [[nodiscard]] auto section_checksum( hash32_t section_name = ".text" ) const {
+                const auto module_base = base_address();
+                const auto sections = image()->get_nt_headers()->sections();
+                auto       section = std::find_if( sections.begin(), sections.end(), [=]( const win::section_header_t& section ) {
+                    return section_name == hash32_t{}( section.name.view() );
+                } );
+
+                const auto section_content = std::span{ module_base.ptr<char>( section->virtual_address ), section->virtual_size };
+                return memory_checksum<Ty>{}.compute( section_content );
             }
 
         private:
@@ -1123,7 +1426,7 @@ namespace shadow {
                     m_value = dynamic_link_library{ table_entry };
                 }
 
-                win::list_entry* m_entry;
+                win::list_entry*   m_entry;
                 mutable value_type m_value;
             };
 
@@ -1180,7 +1483,7 @@ namespace shadow {
 
         private:
             struct export_with_location {
-                address_t address{ 0 };
+                address_t                    address{ 0 };
                 detail::dynamic_link_library location{};
             };
 
@@ -1189,10 +1492,10 @@ namespace shadow {
                     return { 0, {} };
 
                 constexpr bool skip_current_module = true;
-                const auto loaded_modules = module_enumerator{ skip_current_module };
+                const auto     loaded_modules = module_enumerator{ skip_current_module };
 
                 for ( const auto& module : loaded_modules ) {
-                    if ( module_hash != 0 && is_module_hash_invalid( module_hash, module.name() ) )
+                    if ( module_hash != 0 && is_module_hash_invalid( module_hash, module.name().view() ) )
                         continue;
 
                     export_enumerator exports{ module.base_address() };
@@ -1250,216 +1553,17 @@ namespace shadow {
                 return { view, {} };
             }
 
-            address_t m_address{ 0 };
+            address_t                    m_address{ 0 };
             detail::dynamic_link_library m_dll{};
         };
 
         dynamic_link_library dynamic_link_library::find( hash64_t module_name ) const {
             module_enumerator modules{};
-            auto it = modules.find_if( [=, this]( const dynamic_link_library& dll ) -> bool {
-                return !dll.name().empty() && is_module_hash_valid( module_name, dll.name() );
+            auto              it = modules.find_if( [=, this]( const dynamic_link_library& dll ) -> bool {
+                return !dll.name().view().empty() && is_module_hash_valid( module_name, dll.name().view() );
             } );
             return it != modules.end() ? *it : dynamic_link_library{};
         }
-
-        struct kernel_system_time {
-            uint32_t low_part;
-            int32_t high1_time;
-            int32_t high2_time;
-        };
-
-        enum nt_product_type {
-            NtProductWinNt = 1,
-            NtProductLanManNt = 2,
-            NtProductServer = 3
-        };
-
-        enum alternative_architecture_type {
-            StandardDesign,
-            NEC98x86,
-            EndAlternatives
-        };
-
-        struct xstate_feature {
-            uint32_t offset;
-            uint32_t size;
-        };
-
-        struct xstate_configuration {
-            // Mask of all enabled features
-            uint64_t enabled_features;
-            // Mask of volatile enabled features
-            uint64_t enabled_volatile_features;
-            // Total size of the save area for user states
-            uint32_t size;
-            // Control Flags
-            union {
-                uint32_t control_flags;
-                struct {
-                    uint32_t optimized_save:1;
-                    uint32_t compaction_enabled:1;
-                    uint32_t extended_feature_disable:1;
-                };
-            };
-            // List of features
-            xstate_feature features[64];
-            // Mask of all supervisor features
-            uint64_t enabled_supervisor_features;
-            // Mask of features that require start address to be 64 byte aligned
-            uint64_t aligned_features;
-            // Total size of the save area for user and supervisor states
-            uint32_t all_features_size;
-            // List which holds size of each user and supervisor state supported by CPU
-            uint32_t all_features[64];
-            // Mask of all supervisor features that are exposed to user-mode
-            uint64_t enabled_user_visible_supervisor_features;
-            // Mask of features that can be disabled via XFD
-            uint64_t extended_feature_disable_features;
-            // Total size of the save area for non-large user and supervisor states
-            uint32_t all_non_large_feature_size;
-            uint32_t spare;
-        };
-
-        union win32_large_integer {
-            struct {
-                uint32_t low_part;
-                int32_t high_part;
-            };
-            struct {
-                uint32_t low_part;
-                int32_t high_part;
-            } u;
-            uint64_t quad_part;
-        };
-
-        struct kernel_user_shared_data {
-            uint32_t tick_count_low_deprecated;
-            uint32_t tick_count_multiplier;
-            kernel_system_time interrupt_time;
-            kernel_system_time system_time;
-            kernel_system_time time_zone_bias;
-            uint16_t image_number_low;
-            uint16_t image_number_high;
-            wchar_t nt_system_root[260];
-            uint32_t max_stack_trace_depth;
-            uint32_t crypto_exponent;
-            uint32_t time_zone_id;
-            uint32_t large_page_minimum;
-            uint32_t ait_sampling_value;
-            uint32_t app_compat_flag;
-            uint64_t random_seed_version;
-            uint32_t global_validation_runlevel;
-            int32_t time_zone_bias_stamp;
-            uint32_t nt_build_number;
-            nt_product_type nt_product_type;
-            bool product_type_is_valid;
-            bool reserved0[1];
-            uint16_t native_processor_architecture;
-            uint32_t nt_major_version;
-            uint32_t nt_minor_version;
-            bool processor_features[64];
-            uint32_t reserved1;
-            uint32_t reserved3;
-            uint32_t time_slip;
-            alternative_architecture_type alternative_architecture;
-            uint32_t boot_id;
-            win32_large_integer system_expiration_date;
-            uint32_t suite_mask;
-            bool kernel_debugger_enabled;
-            union {
-                uint8_t mitigation_policies;
-                struct {
-                    uint8_t nx_support_policy:2;
-                    uint8_t seh_validation_policy:2;
-                    uint8_t cur_dir_devices_skipped_for_dlls:2;
-                    uint8_t reserved:2;
-                };
-            };
-            uint16_t cycles_per_yield;
-            uint32_t active_console_id;
-            uint32_t dismount_count;
-            uint32_t com_plus_package;
-            uint32_t last_system_rit_event_tick_count;
-            uint32_t number_of_physical_pages;
-            bool safe_boot_mode;
-            union {
-                uint8_t virtualization_flags;
-                struct {
-                    uint8_t arch_started_in_el2:1;
-                    uint8_t qc_sl_is_supported:1;
-                };
-            };
-            uint8_t reserved12[2];
-            union {
-                uint32_t shared_data_flags;
-                struct {
-                    uint32_t dbg_error_port_present:1;
-                    uint32_t dbg_elevation_enabled:1;
-                    uint32_t dbg_virt_enabled:1;
-                    uint32_t dbg_installer_detect_enabled:1;
-                    uint32_t dbg_lkg_enabled:1;
-                    uint32_t dbg_dyn_processor_enabled:1;
-                    uint32_t dbg_console_broker_enabled:1;
-                    uint32_t dbg_secure_boot_enabled:1;
-                    uint32_t dbg_multi_session_sku:1;
-                    uint32_t dbg_multi_users_in_session_sku:1;
-                    uint32_t dbg_state_separation_enabled:1;
-                    uint32_t spare_bits:21;
-                };
-            };
-            uint32_t data_flags_pad[1];
-            uint64_t test_ret_instruction;
-            int64_t qpc_frequency;
-            uint32_t system_call;
-            uint32_t reserved2;
-            uint64_t full_number_of_physical_pages;
-            uint64_t system_call_pad[1];
-            union {
-                kernel_system_time tick_count;
-                uint64_t tick_count_quad;
-                struct {
-                    uint32_t reserved_tick_count_overlay[3];
-                    uint32_t tick_count_pad[1];
-                };
-            };
-            uint32_t cookie;
-            uint32_t cookie_pad[1];
-            int64_t console_session_foreground_process_id;
-            uint64_t time_update_lock;
-            uint64_t baseline_system_time_qpc;
-            uint64_t baseline_interrupt_time_qpc;
-            uint64_t qpc_system_time_increment;
-            uint64_t qpc_interrupt_time_increment;
-            uint8_t qpc_system_time_increment_shift;
-            uint8_t qpc_interrupt_time_increment_shift;
-            uint16_t unparked_processor_count;
-            uint32_t enclave_feature_mask[4];
-            uint32_t telemetry_coverage_round;
-            uint16_t user_mode_global_logger[16];
-            uint32_t image_file_execution_options;
-            uint32_t lang_generation_count;
-            uint64_t reserved4;
-            uint64_t interrupt_time_bias;
-            uint64_t qpc_bias;
-            uint32_t active_processor_count;
-            uint8_t active_group_count;
-            uint8_t reserved9;
-            union {
-                uint16_t qpc_data;
-                struct {
-                    uint8_t qpc_bypass_enabled;
-                    uint8_t qpc_reserved;
-                };
-            };
-            win32_large_integer time_zone_bias_effective_start;
-            win32_large_integer time_zone_bias_effective_end;
-            xstate_configuration xstate;
-            kernel_system_time feature_configuration_change_stamp;
-            uint32_t spare;
-            uint64_t user_pointer_auth_mask;
-            xstate_configuration xstate_arm64;
-            uint32_t reserved10[210];
-        };
 
         class operation_system {
         public:
@@ -1551,12 +1655,12 @@ namespace shadow {
 
         private:
             struct timestamp {
-                int32_t year;
+                int32_t  year;
                 uint32_t month;
                 uint32_t day;
-                int32_t hours;
-                int32_t minutes;
-                int32_t seconds;
+                int32_t  hours;
+                int32_t  minutes;
+                int32_t  seconds;
             };
 
             timestamp break_down_unix_time( std::uint64_t unix_timestamp ) const {
@@ -1566,12 +1670,12 @@ namespace shadow {
                 auto time_since_midnight = std::chrono::duration_cast<std::chrono::seconds>( time_point - days );
 
                 std::chrono::year_month_day ymd{ days };
-                timestamp stamp{ .year = static_cast<int32_t>( ymd.year() ),
-                                 .month = static_cast<uint32_t>( ymd.month() ),
-                                 .day = static_cast<uint32_t>( ymd.day() ),
-                                 .hours = static_cast<int32_t>( std::chrono::duration_cast<std::chrono::hours>( time_since_midnight ).count() ),
-                                 .minutes = static_cast<int32_t>( std::chrono::duration_cast<std::chrono::minutes>( time_since_midnight ).count() % 60 ),
-                                 .seconds = static_cast<int32_t>( time_since_midnight.count() % 60 ) };
+                timestamp                   stamp{ .year = static_cast<int32_t>( ymd.year() ),
+                                                   .month = static_cast<uint32_t>( ymd.month() ),
+                                                   .day = static_cast<uint32_t>( ymd.day() ),
+                                                   .hours = static_cast<int32_t>( std::chrono::duration_cast<std::chrono::hours>( time_since_midnight ).count() ),
+                                                   .minutes = static_cast<int32_t>( std::chrono::duration_cast<std::chrono::minutes>( time_since_midnight ).count() % 60 ),
+                                                   .seconds = static_cast<int32_t>( time_since_midnight.count() % 60 ) };
 
                 return stamp;
             }
@@ -1598,7 +1702,7 @@ namespace shadow {
 
         private:
             std::uint64_t m_unix_seconds;
-            std::int64_t m_timezone_offset;
+            std::int64_t  m_timezone_offset;
         };
 
         template <typename T> concept ChronoDuration = std::is_base_of_v<std::chrono::duration<typename T::rep, typename T::period>, T>;
@@ -1625,7 +1729,7 @@ namespace shadow {
             using hundred_ns_interval = std::chrono::duration<int64_t, std::ratio<1, 10000000>>;
 
         public:
-            constexpr shared_data(): m_data( memory_location.ptr<kernel_user_shared_data>() ) { }
+            constexpr shared_data(): m_data( memory_location.ptr<win::kernel_user_shared_data>() ) { }
 
             [[nodiscard]] auto* raw() const noexcept {
                 return m_data;
@@ -1704,10 +1808,10 @@ namespace shadow {
                 return -bias_seconds.count();
             }
 
-            kernel_user_shared_data* m_data;
+            win::kernel_user_shared_data* m_data;
         };
 
-#if SHADOWSYSCALLS_CACHING
+#ifndef SHADOWSYSCALLS_DISABLE_CACHING
 
         template <typename Ty, typename Kty>
         class memory_cache {
@@ -1718,7 +1822,7 @@ namespace shadow {
         public:
             value_t operator[]( key_t export_hash ) {
                 std::shared_lock lock( m_cache_mutex );
-                auto it = m_cache_map.find( export_hash );
+                auto             it = m_cache_map.find( export_hash );
                 return it == m_cache_map.end() ? value_t{} : it->second;
             }
 
@@ -1734,11 +1838,11 @@ namespace shadow {
 
         private:
             // Making sure that's every `cache_map` call is safe.
-            mutable std::shared_mutex m_cache_mutex{};
+            mutable std::shared_mutex          m_cache_mutex{};
             std::unordered_map<key_t, value_t> m_cache_map{};
         };
 
-        static inline memory_cache<std::uint32_t, hash64_t::underlying_t> ssn_cache;
+        static inline memory_cache<std::uint32_t, hash64_t::underlying_t>      ssn_cache;
         static inline memory_cache<detail::dll_export, hash64_t::underlying_t> address_cache;
 
 #endif
@@ -1826,7 +1930,7 @@ namespace shadow {
 
         [[nodiscard]] Ty* allocate( std::size_t n ) const {
             std::size_t size = n * sizeof( Ty );
-            void* ptr = nt_virtual_alloc( nullptr, size, memory_commit | memory_reserve, page_rwx );
+            void*       ptr = nt_virtual_alloc( nullptr, size, memory_commit | memory_reserve, page_rwx );
             if ( !ptr )
                 throw std::bad_alloc();
             return static_cast<Ty*>( ptr );
@@ -1842,9 +1946,9 @@ namespace shadow {
         using NTSTATUS = std::int32_t;
 
         void* nt_virtual_alloc( void* address, std::uint64_t allocation_size, std::uint32_t allocation_t, std::uint32_t protect ) const {
-            void* current_process{ reinterpret_cast<void*>( -1 ) };
-            void* base_address = address;
-            std::uint64_t region_size = allocation_size;
+            void*            current_process{ reinterpret_cast<void*>( -1 ) };
+            void*            base_address = address;
+            std::uint64_t    region_size = allocation_size;
             static address_t allocation_procedure{ dll_export( "NtAllocateVirtualMemory", "ntdll.dll" ).address() };
 
             auto result = allocation_procedure.execute<NTSTATUS>( current_process, &base_address, 0ull, &region_size, allocation_t & 0xFFFFFFC0, protect );
@@ -1852,10 +1956,10 @@ namespace shadow {
         }
 
         bool nt_virtual_free( void* address, std::uint64_t allocation_size, std::uint32_t flags ) const {
-            NTSTATUS result{ 0 };
-            auto region_size{ allocation_size };
-            void* base_address = address;
-            void* current_process{ reinterpret_cast<void*>( -1 ) };
+            NTSTATUS         result{ 0 };
+            auto             region_size{ allocation_size };
+            void*            base_address = address;
+            void*            current_process{ reinterpret_cast<void*>( -1 ) };
             static address_t free_procedure{ dll_export( "NtFreeVirtualMemory", "ntdll.dll" ).address() };
 
             if ( ( flags & 0xFFFF3FFC ) != 0 || ( flags & 0x8003 ) == 0x8000 && allocation_size )
@@ -1878,26 +1982,24 @@ namespace shadow {
     class shellcode {
     public:
         template <class... Args>
-        shellcode( Args&&... list ) noexcept: m_shellcode{ static_cast<std::uint8_t>( std::forward<Args&&>( list ) )... } {
-            static_assert( ( std::is_convertible_v<Args, std::uint8_t> && ... ), "All arguments must be convertible to std::uint8_t" );
-            static_assert( shell_size != 0, "Shellcode size cannot be zero" );
-        }
+            requires( ( std::is_convertible_v<Args, std::uint8_t> && ... ) && shell_size != 0 )
+        shellcode( Args&&... list ) noexcept: m_shellcode{ static_cast<std::uint8_t>( std::forward<Args&&>( list ) )... } { }
 
         ~shellcode() {
-            if ( m_memory == nullptr )
+            if ( m_memory == nullptr ) {
                 return;
+            }
 
             m_allocator.deallocate( m_memory, shell_size );
             m_memory = nullptr;
         }
 
-        void setup() noexcept {
+        void setup() {
             m_memory = m_allocator.allocate( shell_size );
-            if ( m_memory == nullptr )
-                return;
-
-            std::memcpy( m_memory, m_shellcode.data(), shell_size );
-            m_shellcode_fn = m_memory;
+            if ( m_memory != nullptr ) {
+                memcpy( m_memory, m_shellcode.data(), shell_size );
+                m_shellcode_fn = m_memory;
+            }
         }
 
         template <std::integral Ty = std::uint8_t>
@@ -1911,7 +2013,11 @@ namespace shadow {
         }
 
         template <typename Ty, typename... Args>
-        [[nodiscard]] Ty execute( Args... args ) const noexcept {
+            requires( std::is_default_constructible_v<Ty> )
+        [[nodiscard]] Ty execute( Args&&... args ) const noexcept {
+            if ( !m_shellcode_fn ) {
+                return Ty{};
+            }
             return reinterpret_cast<Ty( __stdcall* )( Args... )>( m_shellcode_fn )( args... );
         }
 
@@ -1921,9 +2027,9 @@ namespace shadow {
         }
 
     private:
-        void* m_shellcode_fn = nullptr;
-        void* m_memory = nullptr;
-        nt_memory_allocator<std::uint8_t> m_allocator;
+        void*                                m_shellcode_fn = nullptr;
+        void*                                m_memory = nullptr;
+        nt_memory_allocator<std::uint8_t>    m_allocator;
         std::array<std::uint8_t, shell_size> m_shellcode;
     };
 
@@ -1935,8 +2041,9 @@ namespace shadow {
     };
 
     template <typename Ty, typename ErrTy>
+        requires( std::is_enum_v<ErrTy> )
     struct call_result_t {
-        Ty value;
+        Ty                   value;
         std::optional<ErrTy> error;
 
         operator Ty() {
@@ -1962,7 +2069,7 @@ namespace shadow {
               } ) { }
 
         template <typename... Args>
-            requires( shadow::is_arch_x64 )
+            requires( shadow::is_x64 )
         call_result_t<Ty, shadow::errc> operator()( Args&&... args ) noexcept {
             auto parse_result = resolve_service_number();
             if ( !parse_result || m_last_error ) {
@@ -1995,7 +2102,7 @@ namespace shadow {
         }
 
         std::optional<uint32_t> resolve_service_number() {
-#if SHADOWSYSCALLS_CACHING
+#ifndef SHADOWSYSCALLS_DISABLE_CACHING
             auto cached_ssn = detail::ssn_cache[m_name_hash];
             if ( cached_ssn != 0 )
                 return cached_ssn;
@@ -2007,7 +2114,7 @@ namespace shadow {
             }
 
             auto parsed_ssn = m_ssn_parser( *this, mod_export.address() );
-#if SHADOWSYSCALLS_CACHING
+#ifndef SHADOWSYSCALLS_DISABLE_CACHING
             if ( parsed_ssn )
                 detail::ssn_cache.try_emplace( m_name_hash, *parsed_ssn );
 #endif
@@ -2031,9 +2138,9 @@ namespace shadow {
 
     private:
         hash64_t::underlying_t m_name_hash;
-        std::uint32_t m_service_number;
-        std::optional<errc> m_last_error;
-        ssn_parser_t m_ssn_parser;
+        std::uint32_t          m_service_number;
+        std::optional<errc>    m_last_error;
+        ssn_parser_t           m_ssn_parser;
 
         shellcode<13> m_shellcode = {
             0x49, 0x89, 0xCA,                         // mov r10, rcx
@@ -2066,7 +2173,7 @@ namespace shadow {
 
     private:
         detail::dll_export get_export( hash64_t export_name, hash64_t module_name ) {
-#if SHADOWSYSCALLS_CACHING
+#ifndef SHADOWSYSCALLS_DISABLE_CACHING
             detail::dll_export module = detail::address_cache[export_name.raw()];
             if ( module == 0 ) {
                 module = dll_export( export_name, module_name );
@@ -2079,7 +2186,7 @@ namespace shadow {
 #endif
         }
 
-        Ty m_call_result{};
+        Ty                 m_call_result{};
         detail::dll_export m_export{ 0 };
     };
 } // namespace shadow
@@ -2106,10 +2213,10 @@ struct std::hash<shadow::hash64_t> {
 };
 
 template <typename Ty = long, class... Args>
-    requires( shadow::is_arch_x64 )
+    requires( shadow::is_x64 )
 inline shadow::call_result_t<Ty, shadow::errc> shadowsyscall( shadow::hash64_t syscall_name, Args&&... args ) {
     shadow::syscaller<std::remove_cv_t<Ty>> sc{ syscall_name };
-    auto result = sc( shadow::detail::convert_nulls_to_nullptrs( args )... );
+    auto                                    result = sc( shadow::detail::convert_nulls_to_nullptrs( args )... );
     return shadow::call_result_t{ result, sc.get_last_error() };
 }
 
