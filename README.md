@@ -27,7 +27,7 @@ shadowcall<int>( "MessageBoxA", nullptr, "string 1", "string 2", MB_OK );
 
 Shellcode uses allocator based on `NtAllocateVirtualMemory` & `NtFreeVirtualMemory`
 
-## Detailed executors example
+## Detailed executors example (x64)
 ```cpp
 // If “set_custom_ssn_parser” was called, the handling
 // of the syscall index falls entirely on the user.
@@ -46,15 +46,15 @@ std::optional<uint32_t> custom_ssn_parser( shadow::syscaller<NTSTATUS>& instance
 // into a number at the compile-time by the hash64_t ctor
 void execute_syscall_with_custom_ssn( shadow::hash64_t function_name ) {
     shadow::syscaller<NTSTATUS> sc{ function_name };
-    sc.set_custom_ssn_parser( custom_ssn_parser );
+    // sc.set_custom_ssn_parser( custom_ssn_parser );
 
-    auto current_process = reinterpret_cast<void*>( -1 );
+    auto          current_process = reinterpret_cast<void*>( -1 );
     std::uint32_t debug_port{ 0 };
     auto [status, err] = sc( current_process, 7, &debug_port, sizeof( uint64_t ), nullptr );
     if ( err )
         std::cerr << "Syscall error occured: " << *err << '\n';
 
-    std::cout << "NtQueryInformationProcess status: " << status << ", debug port is: " << debug_port << "\n";
+    std::cout << "NtQueryInformationProcess status: 0x" << std::hex << status << ", debug port is: " << debug_port << "\n";
 }
 
 int main() {
@@ -74,11 +74,11 @@ int main() {
 
     // "message_box" variable is treated same as "int"
     auto function_result = message_box;
-    std::wcout << "Result: " << function_result << ", DLL that contains MessageBoxA is: " << message_box.export_location().filepath() << '\n';
+    std::cout << "Result: " << function_result << ", DLL that contains MessageBoxA is: " << message_box.export_location().filepath().string() << '\n';
 
-    auto process = reinterpret_cast<HANDLE>( -1 );
+    auto       process = reinterpret_cast<HANDLE>( -1 );
     const auto current_process = reinterpret_cast<HANDLE>( -1 );
-    auto start_routine = []( void* ) -> DWORD {
+    auto       start_routine = []( void* ) -> DWORD {
         std::cout << "\nthread started!\n";
         return 0;
     };
@@ -105,7 +105,7 @@ int main() {
 int main() {
     // Enumerate every dll loaded to current process
     for ( const auto& dll : shadow::dlls() )
-        std::wcout << dll.filepath() << " : " << dll.native_handle() << "\n";
+        std::cout << dll.filepath().string() << " : " << dll.native_handle() << "\n";
 
     std::cout.put( '\n' );
 
@@ -115,13 +115,15 @@ int main() {
     // The implementation doesn't care about the “.dll” suffix.
     auto ntdll = shadow::dll( "ntdll" /* after compilation it will become 384989384324938 */ );
 
-    std::wcout << "Current .exe filepath: " << shadow::current_module().filepath() << "\n\n"; // Contains same methods as "ntdll"
+    auto current_module = shadow::current_module();
+    std::cout << "Current .exe filepath: " << current_module.filepath().string() << "\n";
+    std::cout << "Current .text section checksum: " << current_module.section_checksum<std::size_t>( ".text" ) << "\n\n";
 
     std::cout << ntdll.base_address().ptr() << '\n';                         // .base_address() returns address_t
     std::cout << ntdll.native_handle() << '\n';                              // .native_handle() returns void*
     std::cout << ntdll.entry_point() << '\n';                                // .entry_point() returns address_t, if presented
-    std::wcout << ntdll.name() << '\n';                                      // .name() returns std::wstrview, "NTDLL.DLL"
-    std::wcout << ntdll.filepath() << '\n';                                  // .filepath() returns std::wstrview, "C:\WINDOWS\SYSTEM32\NTDLL.DLL"
+    std::cout << ntdll.name().string() << '\n';                              // .name() returns win::unicode_string
+    std::cout << ntdll.filepath().to_path().extension() << '\n';             // .filepath() returns win::unicode_string
     std::cout << ntdll.image()->get_nt_headers()->signature << '\n';         // returns uint32_t, NT magic value
     std::cout << ntdll.image()->get_optional_header()->size_image << "\n\n"; // returns uint32_t, loaded NTDLL image size
 
@@ -134,7 +136,7 @@ int main() {
     auto it = ntdll.exports().find_if( []( auto export_data ) -> bool {
         const auto& [name, address] = export_data;
         constexpr auto compiletime_hash = shadow::hash64_t{ "NtQuerySystemInformation" }; // after compilation it will become 384989384324938
-        const auto runtime_hash = shadow::hash64_t{}( name );                             // accepts any range that have access by index
+        const auto     runtime_hash = shadow::hash64_t{}( name );                         // accepts any range that have access by index
         return compiletime_hash == runtime_hash;
     } );
 
@@ -142,7 +144,7 @@ int main() {
     std::cout << "Found target export:\n" << name << " : " << address << "\n\n";
 
     // "location" returns a DLL struct that contains this export
-    std::wcout << "DLL that contains Sleep export is: " << shadow::dll_export( "Sleep" ).location().name() << "\n\n";
+    std::cout << "DLL that contains Sleep export is: " << shadow::dll_export( "Sleep" ).location().name().to_path() << "\n\n";
 
     // shared_data parses KUSER_SHARED_DATA
     // The class is a high-level wrapper for parsing,
@@ -178,10 +180,10 @@ int main() {
 
 ## 🚀 Features
 
-- Caching each call
-- Exception-safe code
+- Caching each call (it is possible to disable caching)
 - Enumerate every DLL loaded to current process
-- Find exactly known module loaded to current process
+- Compute checksum of the DLL section (any) in runtime
+- Find exactly known DLL loaded to current process
 - Enumerate EAT of module
 - Resolve PE-headers and directories of module
 - Compile-time string hasher
