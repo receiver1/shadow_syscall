@@ -2080,7 +2080,7 @@ namespace shadow {
                 m_service_number = *parse_result;
             }
             setup_shellcode();
-            return { m_shellcode.execute<Ty>( std::forward<Args>( args )... ), get_last_error() };
+            return { m_shellcode.execute<Ty>( shadow::detail::convert_nulls_to_nullptrs( args )... ), get_last_error() };
         }
 
         void set_custom_ssn_parser( ssn_parser_t parser ) {
@@ -2160,7 +2160,7 @@ namespace shadow {
 
         template <typename... Args>
         Ty operator()( Args&&... args ) noexcept {
-            return m_call_result = m_export.address().execute<Ty>( std::forward<Args>( args )... );
+            return m_call_result = m_export.address().execute<Ty>( shadow::detail::convert_nulls_to_nullptrs( args )... );
         }
 
         [[nodiscard]] auto export_location() const noexcept {
@@ -2223,7 +2223,7 @@ inline shadow::call_result_t<Ty, shadow::errc> shadowsyscall( shadow::hash64_t s
 template <typename Ty = std::monostate, class... Args>
 inline shadow::importer<Ty> shadowcall( shadow::hash64_t export_name, Args&&... args ) {
     shadow::importer<Ty> importer{ export_name };
-    importer( shadow::detail::convert_nulls_to_nullptrs( args )... );
+    importer( std::forward<Args>( args )... );
     return importer;
 }
 
@@ -2231,7 +2231,7 @@ template <typename Ty = std::monostate, class... Args>
 inline shadow::importer<Ty> shadowcall( shadow::hashpair export_and_module_names, Args&&... args ) {
     const auto& [export_name, module_name] = export_and_module_names;
     shadow::importer<Ty> importer{ export_name, module_name };
-    importer( shadow::detail::convert_nulls_to_nullptrs( args )... );
+    importer( std::forward<Args>( args )... );
     return importer;
 }
 
