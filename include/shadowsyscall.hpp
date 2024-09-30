@@ -36,7 +36,7 @@ namespace shadow {
 
     [[maybe_unused]] constexpr auto bitness = std::numeric_limits<uintptr_t>::digits;
     [[maybe_unused]] constexpr auto is_x64 = bitness == 64;
-    [[maybe_unused]] constexpr auto is_x32 = bitness == 64;
+    [[maybe_unused]] constexpr auto is_x32 = bitness == 32;
 
     class address_t {
     public:
