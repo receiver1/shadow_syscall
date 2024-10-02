@@ -1553,7 +1553,7 @@ namespace shadow {
             detail::dynamic_link_library m_dll{};
         };
 
-        dynamic_link_library dynamic_link_library::find( hash64_t module_name ) const {
+        inline dynamic_link_library dynamic_link_library::find( hash64_t module_name ) const {
             module_enumerator modules{};
             auto              it = modules.find_if( [=, this]( const dynamic_link_library& dll ) -> bool {
                 return !dll.name().view().empty() && is_module_hash_valid( module_name, dll.name().view() );
@@ -1884,29 +1884,29 @@ namespace shadow {
         hash64_t second;
     };
 
-    auto dll( hash64_t name ) {
+    inline auto dll( hash64_t name ) {
         return detail::dynamic_link_library{ name };
     }
 
-    auto current_module() {
+    inline auto current_module() {
         constexpr auto skip_current_module = false;
         return *( detail::module_enumerator{ skip_current_module }.begin() );
     }
 
-    auto dll_export( hash64_t export_name, hash64_t module_name = 0 ) {
+    inline auto dll_export( hash64_t export_name, hash64_t module_name = 0 ) {
         return detail::dll_export{ export_name, module_name };
     }
 
-    auto dlls() {
+    inline auto dlls() {
         constexpr auto skip_current_module = true;
         return detail::module_enumerator{ skip_current_module };
     }
 
-    auto dll_exports( hash64_t module_name ) {
+    inline auto dll_exports( hash64_t module_name ) {
         return detail::export_enumerator{ dll( module_name ).base_address() };
     }
 
-    auto shared_data() {
+    inline auto shared_data() {
         return detail::shared_data{};
     }
 
