@@ -196,10 +196,17 @@ int main() {
     std::cout << shadow::cpu().vendor() << std::endl;
     std::cout << shadow::cpu().brand() << std::endl;
 
-    std::cout << "L1 cache size:     " << shadow::cpu().caches().l1_size() << "\n";
-    std::cout << "L2 cache size:     " << shadow::cpu().caches().l2_size() << "\n";
-    std::cout << "L3 cache size:     " << shadow::cpu().caches().l3_size() << "\n";
-    std::cout << "Total caches size: " << shadow::cpu().caches().total_size().as_bytes() << "\n";
+    const auto& caches = shadow::cpu().caches();
+
+    // CPU caches parsing is supported for current processor
+    if ( caches ) {
+        std::cout << "L1 cache size:     " << caches->l1_size() << "\n";
+        std::cout << "L2 cache size:     " << caches->l2_size() << "\n";
+        std::cout << "L3 cache size:     " << caches->l3_size() << "\n";
+        std::cout << "Total caches size: " << caches->total_size().as_bytes() << "\n";
+    } else {
+        std::cout << "Cache parsing is not supported on your processor architecture\n";
+    }
 
     support_message( "IS_INTEL", shadow::cpu().is_intel() );
     support_message( "IS_AMD", shadow::cpu().is_amd() );
