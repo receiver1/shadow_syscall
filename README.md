@@ -205,7 +205,8 @@ int main() {
         std::cout << "L3 cache size:     " << caches->l3_size() << "\n";
         std::cout << "Total caches size: " << caches->total_size().as_bytes() << "\n";
     } else {
-        std::cout << "Cache parsing is not supported on your processor architecture\n";
+        // Otherwise - the library does not yet support parsing for the existing processor
+        std::cout << "Cache parsing is not supported by `shadow` on your processor architecture\n";
     }
 
     support_message( "IS_INTEL", shadow::cpu().is_intel() );
