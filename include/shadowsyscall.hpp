@@ -1072,7 +1072,16 @@ namespace shadow {
             [[nodiscard]] bool is_amd() const noexcept { return m_is_amd; }
 
             // \return caches returns CPU caches information
-            [[nodiscard]] caches_info caches() const noexcept { return caches_info{}; }
+            // (only works for Intel so far)
+            [[nodiscard]] std::optional<caches_info> caches() const noexcept {
+                if (is_intel()) {
+                    return caches_info{};
+                } else {
+                    // Not really sure about processors other than Intel.
+                    // Any good PR with a solution is greatly appreciated
+                    return std::nullopt;
+                }
+            }
 
             // \return returns processor vendor name
             [[nodiscard]] std::string vendor() const noexcept { return m_vendor; }
