@@ -18,12 +18,14 @@
 
 #include <algorithm>
 #include <array>
+#include <bitset>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
 #include <intrin.h>
 #include <iostream>
+#include <math.h>
 #include <numeric>
 #include <optional>
 #include <ranges>
@@ -111,8 +113,8 @@ namespace shadow {
     };
 
     namespace win {
-        static constexpr std::uint32_t NUM_DATA_DIRECTORIES = 16;
-        static constexpr std::uint32_t img_npos = 0xFFFFFFFF;
+        constexpr static std::uint32_t NUM_DATA_DIRECTORIES = 16;
+        constexpr static std::uint32_t img_npos = 0xFFFFFFFF;
 
         union version_t {
             uint16_t identifier;
@@ -156,7 +158,7 @@ namespace shadow {
 
         public:
             constexpr unicode_string() = default;
-            constexpr unicode_string( const std::uint16_t length, const std::uint16_t max_length, pointer_t buffer ) noexcept
+            constexpr unicode_string( pointer_t buffer, std::uint16_t length, std::uint16_t max_length = 0 ) noexcept
                 : m_length( length ), m_max_length( max_length ), m_buffer( buffer ) { }
 
             unicode_string( const unicode_string& instance ) = default;
@@ -217,7 +219,7 @@ namespace shadow {
 
             std::uint16_t m_length{ 0 };
             std::uint16_t m_max_length{ 0 };
-            pointer_t     m_buffer{ nullptr };
+            pointer_t m_buffer{ nullptr };
         };
 
         struct list_entry {
@@ -246,16 +248,16 @@ namespace shadow {
         };
 
         struct data_directory_t {
-            std::uint32_t      rva;
-            std::uint32_t      size;
+            std::uint32_t rva;
+            std::uint32_t size;
             [[nodiscard]] bool present() const noexcept {
                 return size > 0;
             }
         };
 
         struct raw_data_directory_t {
-            uint32_t           ptr_raw_data;
-            uint32_t           size;
+            uint32_t ptr_raw_data;
+            uint32_t size;
             [[nodiscard]] bool present() const noexcept {
                 return size > 0;
             }
@@ -264,22 +266,22 @@ namespace shadow {
         struct data_directories_x64_t {
             union {
                 struct {
-                    data_directory_t     export_directory;
-                    data_directory_t     import_directory;
-                    data_directory_t     resource_directory;
-                    data_directory_t     exception_directory;
+                    data_directory_t export_directory;
+                    data_directory_t import_directory;
+                    data_directory_t resource_directory;
+                    data_directory_t exception_directory;
                     raw_data_directory_t security_directory; // File offset instead of RVA!
-                    data_directory_t     basereloc_directory;
-                    data_directory_t     debug_directory;
-                    data_directory_t     architecture_directory;
-                    data_directory_t     globalptr_directory;
-                    data_directory_t     tls_directory;
-                    data_directory_t     load_config_directory;
-                    data_directory_t     bound_import_directory;
-                    data_directory_t     iat_directory;
-                    data_directory_t     delay_import_directory;
-                    data_directory_t     com_descriptor_directory;
-                    data_directory_t     _reserved0;
+                    data_directory_t basereloc_directory;
+                    data_directory_t debug_directory;
+                    data_directory_t architecture_directory;
+                    data_directory_t globalptr_directory;
+                    data_directory_t tls_directory;
+                    data_directory_t load_config_directory;
+                    data_directory_t bound_import_directory;
+                    data_directory_t iat_directory;
+                    data_directory_t delay_import_directory;
+                    data_directory_t com_descriptor_directory;
+                    data_directory_t _reserved0;
                 };
                 data_directory_t entries[NUM_DATA_DIRECTORIES];
             };
@@ -288,38 +290,38 @@ namespace shadow {
         struct data_directories_x86_t {
             union {
                 struct {
-                    data_directory_t     export_directory;
-                    data_directory_t     import_directory;
-                    data_directory_t     resource_directory;
-                    data_directory_t     exception_directory;
+                    data_directory_t export_directory;
+                    data_directory_t import_directory;
+                    data_directory_t resource_directory;
+                    data_directory_t exception_directory;
                     raw_data_directory_t security_directory; // File offset instead of RVA!
-                    data_directory_t     basereloc_directory;
-                    data_directory_t     debug_directory;
-                    data_directory_t     copyright_directory;
-                    data_directory_t     globalptr_directory;
-                    data_directory_t     tls_directory;
-                    data_directory_t     load_config_directory;
-                    data_directory_t     bound_import_directory;
-                    data_directory_t     iat_directory;
-                    data_directory_t     delay_import_directory;
-                    data_directory_t     com_descriptor_directory;
-                    data_directory_t     _reserved0;
+                    data_directory_t basereloc_directory;
+                    data_directory_t debug_directory;
+                    data_directory_t copyright_directory;
+                    data_directory_t globalptr_directory;
+                    data_directory_t tls_directory;
+                    data_directory_t load_config_directory;
+                    data_directory_t bound_import_directory;
+                    data_directory_t iat_directory;
+                    data_directory_t delay_import_directory;
+                    data_directory_t com_descriptor_directory;
+                    data_directory_t _reserved0;
                 };
                 data_directory_t entries[NUM_DATA_DIRECTORIES];
             };
         };
 
         struct export_directory_t {
-            uint32_t  characteristics;
-            uint32_t  timedate_stamp;
+            uint32_t characteristics;
+            uint32_t timedate_stamp;
             version_t version;
-            uint32_t  name;
-            uint32_t  base;
-            uint32_t  num_functions;
-            uint32_t  num_names;
-            uint32_t  rva_functions;
-            uint32_t  rva_names;
-            uint32_t  rva_name_ordinals;
+            uint32_t name;
+            uint32_t base;
+            uint32_t num_functions;
+            uint32_t num_names;
+            uint32_t rva_functions;
+            uint32_t rva_names;
+            uint32_t rva_name_ordinals;
 
             [[nodiscard]] auto rva_table( std::uintptr_t base_address ) const {
                 return reinterpret_cast<std::uint32_t*>( base_address + rva_functions );
@@ -349,17 +351,17 @@ namespace shadow {
         };
 
         struct loader_table_entry {
-            list_entry     in_load_order_links;
-            list_entry     in_memory_order_links;
+            list_entry in_load_order_links;
+            list_entry in_memory_order_links;
             std::nullptr_t reserved[2];
-            address_t      base_address;
-            address_t      entry_point;
+            address_t base_address;
+            address_t entry_point;
             std::nullptr_t reserved2;
             unicode_string path;
             unicode_string name;
             std::nullptr_t reserved3[3];
             union {
-                std::uint32_t  check_sum;
+                std::uint32_t check_sum;
                 std::nullptr_t reserved4;
             };
             std::uint32_t time_date_stamp;
@@ -367,18 +369,18 @@ namespace shadow {
 
         struct module_loader_data {
             std::uint32_t length;
-            std::uint8_t  initialized;
-            void*         ss_handle;
-            list_entry    in_load_order_module_list;
-            list_entry    in_memory_order_module_list;
-            list_entry    in_initialization_order_module_list;
+            std::uint8_t initialized;
+            void* ss_handle;
+            list_entry in_load_order_module_list;
+            list_entry in_memory_order_module_list;
+            list_entry in_initialization_order_module_list;
         };
 
         struct PEB {
-            uint8_t             reserved1[2];
-            uint8_t             being_debugged;
-            uint8_t             reserved2[1];
-            std::nullptr_t      reserved3[2];
+            uint8_t reserved1[2];
+            uint8_t being_debugged;
+            uint8_t reserved2[1];
+            std::nullptr_t reserved3[2];
             module_loader_data* ldr_data;
 
             static auto address() noexcept {
@@ -427,62 +429,62 @@ namespace shadow {
 
         struct optional_header_x64_t {
             // Standard fields.
-            uint16_t               magic;
-            version_t              linker_version;
-            uint32_t               size_code;
-            uint32_t               size_init_data;
-            uint32_t               size_uninit_data;
-            uint32_t               entry_point;
-            uint32_t               base_of_code;
-            uint64_t               image_base;
-            uint32_t               section_alignment;
-            uint32_t               file_alignment;
-            ex_version_t           os_version;
-            ex_version_t           img_version;
-            ex_version_t           subsystem_version;
-            uint32_t               win32_version_value;
-            uint32_t               size_image;
-            uint32_t               size_headers;
-            uint32_t               checksum;
-            subsystem_id           subsystem;
-            uint16_t               characteristics;
-            uint64_t               size_stack_reserve;
-            uint64_t               size_stack_commit;
-            uint64_t               size_heap_reserve;
-            uint64_t               size_heap_commit;
-            uint32_t               ldr_flags;
-            uint32_t               num_data_directories;
+            uint16_t magic;
+            version_t linker_version;
+            uint32_t size_code;
+            uint32_t size_init_data;
+            uint32_t size_uninit_data;
+            uint32_t entry_point;
+            uint32_t base_of_code;
+            uint64_t image_base;
+            uint32_t section_alignment;
+            uint32_t file_alignment;
+            ex_version_t os_version;
+            ex_version_t img_version;
+            ex_version_t subsystem_version;
+            uint32_t win32_version_value;
+            uint32_t size_image;
+            uint32_t size_headers;
+            uint32_t checksum;
+            subsystem_id subsystem;
+            uint16_t characteristics;
+            uint64_t size_stack_reserve;
+            uint64_t size_stack_commit;
+            uint64_t size_heap_reserve;
+            uint64_t size_heap_commit;
+            uint32_t ldr_flags;
+            uint32_t num_data_directories;
             data_directories_x64_t data_directories;
         };
 
         struct optional_header_x86_t {
             // Standard fields.
-            uint16_t               magic;
-            version_t              linker_version;
-            uint32_t               size_code;
-            uint32_t               size_init_data;
-            uint32_t               size_uninit_data;
-            uint32_t               entry_point;
-            uint32_t               base_of_code;
-            uint32_t               base_of_data;
-            uint32_t               image_base;
-            uint32_t               section_alignment;
-            uint32_t               file_alignment;
-            ex_version_t           os_version;
-            ex_version_t           img_version;
-            ex_version_t           subsystem_version;
-            uint32_t               win32_version_value;
-            uint32_t               size_image;
-            uint32_t               size_headers;
-            uint32_t               checksum;
-            subsystem_id           subsystem;
-            uint16_t               characteristics;
-            uint32_t               size_stack_reserve;
-            uint32_t               size_stack_commit;
-            uint32_t               size_heap_reserve;
-            uint32_t               size_heap_commit;
-            uint32_t               ldr_flags;
-            uint32_t               num_data_directories;
+            uint16_t magic;
+            version_t linker_version;
+            uint32_t size_code;
+            uint32_t size_init_data;
+            uint32_t size_uninit_data;
+            uint32_t entry_point;
+            uint32_t base_of_code;
+            uint32_t base_of_data;
+            uint32_t image_base;
+            uint32_t section_alignment;
+            uint32_t file_alignment;
+            ex_version_t os_version;
+            ex_version_t img_version;
+            ex_version_t subsystem_version;
+            uint32_t win32_version_value;
+            uint32_t size_image;
+            uint32_t size_headers;
+            uint32_t checksum;
+            subsystem_id subsystem;
+            uint16_t characteristics;
+            uint32_t size_stack_reserve;
+            uint32_t size_stack_commit;
+            uint32_t size_heap_reserve;
+            uint32_t size_heap_commit;
+            uint32_t ldr_flags;
+            uint32_t num_data_directories;
             data_directories_x86_t data_directories;
 
             inline bool has_directory( const data_directory_t* dir ) const {
@@ -497,8 +499,8 @@ namespace shadow {
         using optional_header_t = std::conditional_t<is_x64, optional_header_x64_t, optional_header_x86_t>;
 
         struct nt_headers_t {
-            uint32_t          signature;
-            file_header_t     file_header;
+            uint32_t signature;
+            file_header_t file_header;
             optional_header_t optional_header;
 
             // Section getters
@@ -518,9 +520,9 @@ namespace shadow {
             // Section iterator
             template <typename T>
             struct proxy {
-                T*       base;
+                T* base;
                 uint16_t count;
-                T*       begin() const {
+                T* begin() const {
                     return base;
                 }
                 T* end() const {
@@ -662,15 +664,15 @@ namespace shadow {
         }
 
         template <typename T, typename FieldT>
-        constexpr T* containing_record( FieldT* address, FieldT T::*field ) {
+        constexpr T* containing_record( FieldT* address, FieldT T::* field ) {
             auto offset = reinterpret_cast<std::uintptr_t>( &( reinterpret_cast<T*>( 0 )->*field ) );
             return reinterpret_cast<T*>( reinterpret_cast<std::uintptr_t>( address ) - offset );
         }
 
         struct kernel_system_time {
             uint32_t low_part;
-            int32_t  high1_time;
-            int32_t  high2_time;
+            int32_t high1_time;
+            int32_t high2_time;
         };
 
         enum nt_product_type {
@@ -728,49 +730,49 @@ namespace shadow {
         union win32_large_integer {
             struct {
                 uint32_t low_part;
-                int32_t  high_part;
+                int32_t high_part;
             };
             struct {
                 uint32_t low_part;
-                int32_t  high_part;
+                int32_t high_part;
             } u;
             uint64_t quad_part;
         };
 
         struct kernel_user_shared_data {
-            uint32_t              tick_count_low_deprecated;
-            uint32_t              tick_count_multiplier;
-            kernel_system_time    interrupt_time;
-            kernel_system_time    system_time;
-            kernel_system_time    time_zone_bias;
-            uint16_t              image_number_low;
-            uint16_t              image_number_high;
-            wchar_t               nt_system_root[260];
-            uint32_t              max_stack_trace_depth;
-            uint32_t              crypto_exponent;
-            uint32_t              time_zone_id;
-            uint32_t              large_page_minimum;
-            uint32_t              ait_sampling_value;
-            uint32_t              app_compat_flag;
-            uint64_t              random_seed_version;
-            uint32_t              global_validation_runlevel;
-            int32_t               time_zone_bias_stamp;
-            uint32_t              nt_build_number;
-            nt_product_type       nt_product_type;
-            bool                  product_type_is_valid;
-            bool                  reserved0[1];
-            uint16_t              native_processor_architecture;
-            uint32_t              nt_major_version;
-            uint32_t              nt_minor_version;
-            bool                  processor_features[64];
-            uint32_t              reserved1;
-            uint32_t              reserved3;
-            uint32_t              time_slip;
+            uint32_t tick_count_low_deprecated;
+            uint32_t tick_count_multiplier;
+            kernel_system_time interrupt_time;
+            kernel_system_time system_time;
+            kernel_system_time time_zone_bias;
+            uint16_t image_number_low;
+            uint16_t image_number_high;
+            wchar_t nt_system_root[260];
+            uint32_t max_stack_trace_depth;
+            uint32_t crypto_exponent;
+            uint32_t time_zone_id;
+            uint32_t large_page_minimum;
+            uint32_t ait_sampling_value;
+            uint32_t app_compat_flag;
+            uint64_t random_seed_version;
+            uint32_t global_validation_runlevel;
+            int32_t time_zone_bias_stamp;
+            uint32_t nt_build_number;
+            nt_product_type nt_product_type;
+            bool product_type_is_valid;
+            bool reserved0[1];
+            uint16_t native_processor_architecture;
+            uint32_t nt_major_version;
+            uint32_t nt_minor_version;
+            bool processor_features[64];
+            uint32_t reserved1;
+            uint32_t reserved3;
+            uint32_t time_slip;
             alternative_arch_type alternative_arch;
-            uint32_t              boot_id;
-            win32_large_integer   system_expiration_date;
-            uint32_t              suite_mask;
-            bool                  kernel_debugger_enabled;
+            uint32_t boot_id;
+            win32_large_integer system_expiration_date;
+            uint32_t suite_mask;
+            bool kernel_debugger_enabled;
             union {
                 uint8_t mitigation_policies;
                 struct {
@@ -786,7 +788,7 @@ namespace shadow {
             uint32_t com_plus_package;
             uint32_t last_system_rit_event_tick_count;
             uint32_t number_of_physical_pages;
-            bool     safe_boot_mode;
+            bool safe_boot_mode;
             union {
                 uint8_t virtualization_flags;
                 struct {
@@ -814,14 +816,14 @@ namespace shadow {
             };
             uint32_t data_flags_pad[1];
             uint64_t test_ret_instruction;
-            int64_t  qpc_frequency;
+            int64_t qpc_frequency;
             uint32_t system_call;
             uint32_t reserved2;
             uint64_t full_number_of_physical_pages;
             uint64_t system_call_pad[1];
             union {
                 kernel_system_time tick_count;
-                uint64_t           tick_count_quad;
+                uint64_t tick_count_quad;
                 struct {
                     uint32_t reserved_tick_count_overlay[3];
                     uint32_t tick_count_pad[1];
@@ -829,14 +831,14 @@ namespace shadow {
             };
             uint32_t cookie;
             uint32_t cookie_pad[1];
-            int64_t  console_session_foreground_process_id;
+            int64_t console_session_foreground_process_id;
             uint64_t time_update_lock;
             uint64_t baseline_system_time_qpc;
             uint64_t baseline_interrupt_time_qpc;
             uint64_t qpc_system_time_increment;
             uint64_t qpc_interrupt_time_increment;
-            uint8_t  qpc_system_time_increment_shift;
-            uint8_t  qpc_interrupt_time_increment_shift;
+            uint8_t qpc_system_time_increment_shift;
+            uint8_t qpc_interrupt_time_increment_shift;
             uint16_t unparked_processor_count;
             uint32_t enclave_feature_mask[4];
             uint32_t telemetry_coverage_round;
@@ -847,8 +849,8 @@ namespace shadow {
             uint64_t interrupt_time_bias;
             uint64_t qpc_bias;
             uint32_t active_processor_count;
-            uint8_t  active_group_count;
-            uint8_t  reserved9;
+            uint8_t active_group_count;
+            uint8_t reserved9;
             union {
                 uint16_t qpc_data;
                 struct {
@@ -856,14 +858,14 @@ namespace shadow {
                     uint8_t qpc_reserved;
                 };
             };
-            win32_large_integer  time_zone_bias_effective_start;
-            win32_large_integer  time_zone_bias_effective_end;
+            win32_large_integer time_zone_bias_effective_start;
+            win32_large_integer time_zone_bias_effective_end;
             xstate_configuration xstate;
-            kernel_system_time   feature_configuration_change_stamp;
-            uint32_t             spare;
-            uint64_t             user_pointer_auth_mask;
+            kernel_system_time feature_configuration_change_stamp;
+            uint32_t spare;
+            uint64_t user_pointer_auth_mask;
             xstate_configuration xstate_arm64;
-            uint32_t             reserved10[210];
+            uint32_t reserved10[210];
         };
 
     } // namespace win
@@ -927,7 +929,7 @@ namespace shadow {
 
         private:
             alignas( void* ) std::byte m_storage[32];
-            function_ptr_t   m_invoker{ nullptr };
+            function_ptr_t m_invoker{ nullptr };
             destructor_ptr_t m_destroyer{ nullptr };
         };
 
@@ -935,7 +937,7 @@ namespace shadow {
         consteval Ty generate_compilation_seed() {
             Ty hash = __cplusplus;
 
-            // \note: @annihilatorq Fix note since 27.08.2024:
+            // \note: Fix note since 27.08.2024:
             // We cannot use __TIME__ or alternatives here since
             // such macros represent the build time of a translation
             // unit, not the build time of the entire project.
@@ -958,8 +960,8 @@ namespace shadow {
         class basic_hash {
         public:
             using underlying_t = ValTy;
-            static constexpr bool  case_sensitive = false;
-            static constexpr ValTy FNV_prime = ( sizeof( ValTy ) == 4 ) ? 16777619u : 1099511628211ull;
+            constexpr static bool case_sensitive = false;
+            constexpr static ValTy FNV_prime = ( sizeof( ValTy ) == 4 ) ? 16777619u : 1099511628211ull;
 
         public:
             constexpr basic_hash( ValTy hash ): m_value( hash ) { }
@@ -1024,6 +1026,371 @@ namespace shadow {
         using hash32_t = detail::basic_hash<uint32_t>;
         using hash64_t = detail::basic_hash<uint64_t>;
 
+        class memory_converter {
+            constexpr static auto conversion_value = 1000.0;
+
+        public:
+            template <std::integral Ty>
+            explicit memory_converter( Ty bytes ) noexcept: m_bytes( bytes ) { }
+
+            [[nodiscard]] auto as_bytes() const noexcept {
+                return m_bytes;
+            }
+
+            [[nodiscard]] auto as_kilobytes() const noexcept {
+                return static_cast<std::double_t>( m_bytes ) / conversion_value;
+            }
+
+            [[nodiscard]] auto as_megabytes() const noexcept {
+                return static_cast<std::double_t>( m_bytes ) / ( std::pow( conversion_value, 2 ) );
+            }
+
+            [[nodiscard]] auto as_gigabytes() const noexcept {
+                return static_cast<std::double_t>( m_bytes ) / ( std::pow( conversion_value, 3 ) );
+            }
+
+            // Use implicit conversion
+            operator std::size_t() const noexcept {
+                return m_bytes;
+            }
+
+        private:
+            std::size_t m_bytes;
+        };
+
+        class hardware_processor {
+            class caches_info;
+
+        public:
+            hardware_processor() noexcept {
+                parse_cpu_fields();
+            }
+
+            // clang-format off
+
+            [[nodiscard]] bool is_intel() const noexcept { return m_is_intel; }
+            [[nodiscard]] bool is_amd() const noexcept { return m_is_amd; }
+
+            // \return caches returns CPU caches information
+            [[nodiscard]] caches_info caches() const noexcept { return caches_info{}; }
+
+            // \return returns processor vendor name
+            [[nodiscard]] std::string vendor() const noexcept { return m_vendor; }
+
+            // \return returns cpu full name
+            [[nodiscard]] std::string brand() const noexcept { return m_brand; }
+
+            // \return returns true if SSE (Streaming SIMD Extensions) is supported
+            [[nodiscard]] bool supports_sse() const noexcept { return m_standard_features_edx[25]; }
+
+            // \return returns true if SSE2 is supported by the CPU
+            [[nodiscard]] bool supports_sse2() const noexcept { return m_standard_features_edx[26]; }
+
+            // \return returns true if SSE3 is supported by the CPU
+            [[nodiscard]] bool supports_sse3() const noexcept { return m_standard_features_ecx[0]; }
+
+            // \return returns true if SSSE3 is supported by the CPU
+            [[nodiscard]] bool supports_ssse3() const noexcept { return m_standard_features_ecx[9]; }
+
+            // \return returns true if SSE4.1 is supported by the CPU
+            [[nodiscard]] bool supports_sse4_1() const noexcept { return m_standard_features_ecx[19]; }
+
+            // \return returns true if SSE4.2 is supported by the CPU
+            [[nodiscard]] bool supports_sse4_2() const noexcept { return m_standard_features_ecx[20]; }
+
+            // AVX Instruction Set
+            // \return returns true if AVX (Advanced Vector Extensions) is supported
+            [[nodiscard]] bool supports_avx() const noexcept { return m_standard_features_ecx[28]; }
+
+            // \return returns true if AVX2 is supported by the CPU
+            [[nodiscard]] bool supports_avx2() const noexcept { return m_extended_features_ebx[5]; }
+
+            // \return returns true if AVX-512 Foundation is supported
+            [[nodiscard]] bool supports_avx512f() const noexcept { return m_extended_features_ebx[16]; }
+
+            // \return returns true if AVX-512 Prefetch is supported
+            [[nodiscard]] bool supports_avx512pf() const noexcept { return m_extended_features_ebx[26]; }
+
+            // \return returns true if AVX-512 Exponential and Reciprocal is supported
+            [[nodiscard]] bool supports_avx512er() const noexcept { return m_extended_features_ebx[27]; }
+
+            // \return returns true if AVX-512 Conflict Detection is supported
+            [[nodiscard]] bool supports_avx512cd() const noexcept { return m_extended_features_ebx[28]; }
+
+            // AMD-Specific Extensions
+            // \return returns true if SSE4a is supported on AMD CPUs
+            [[nodiscard]] bool supports_sse4a() const noexcept { return m_is_amd && m_amd_extended_features_ecx[6]; }
+
+            // \return returns true if LAHF/SAHF is supported in 64-bit mode
+            [[nodiscard]] bool supports_lahf() const noexcept { return m_amd_extended_features_ecx[0]; }
+
+            // \return returns true if ABM (Advanced Bit Manipulation) is supported on AMD CPUs
+            [[nodiscard]] bool supports_abm() const noexcept { return m_is_amd && m_amd_extended_features_ecx[5]; }
+
+            // \return returns true if XOP (Extended Operations) is supported on AMD CPUs
+            [[nodiscard]] bool supports_xop() const noexcept { return m_is_amd && m_amd_extended_features_ecx[11]; }
+
+            // \return returns true if TBM (Trailing Bit Manipulation) is supported on AMD CPUs
+            [[nodiscard]] bool supports_tbm() const noexcept { return m_is_amd && m_amd_extended_features_ecx[21]; }
+
+            // \return returns true if MMX extensions are supported on AMD CPUs
+            [[nodiscard]] bool supports_mmxext() const noexcept { return m_is_amd && m_amd_extended_features_edx[22]; }
+
+            // Other Instruction Set Extensions
+            // \return returns true if PCLMULQDQ (Carry-Less Multiplication) is supported
+            [[nodiscard]] bool supports_pclmulqdq() const noexcept { return m_standard_features_ecx[1]; }
+
+            // \return returns true if MONITOR/MWAIT instructions are supported
+            [[nodiscard]] bool supports_monitor() const noexcept { return m_standard_features_ecx[3]; }
+
+            // \return returns true if FMA (Fused Multiply-Add) is supported
+            [[nodiscard]] bool supports_fma() const noexcept { return m_standard_features_ecx[12]; }
+
+            // \return returns true if CMPXCHG16B is supported by the CPU
+            [[nodiscard]] bool supports_cmpxchg16b() const noexcept { return m_standard_features_ecx[13]; }
+
+            // \return returns true if MOVBE (Move with Byte Swap) is supported
+            [[nodiscard]] bool supports_movbe() const noexcept { return m_standard_features_ecx[22]; }
+
+            // \return returns true if POPCNT (Population Count) instruction is supported
+            [[nodiscard]] bool supports_popcnt() const noexcept { return m_standard_features_ecx[23]; }
+
+            // \return returns true if AES-NI (Advanced Encryption Standard) is supported
+            [[nodiscard]] bool supports_aes() const noexcept { return m_standard_features_ecx[25]; }
+
+            // \return returns true if XSAVE/XRSTOR instructions are supported
+            [[nodiscard]] bool supports_xsave() const noexcept { return m_standard_features_ecx[26]; }
+
+            // \return returns true if OSXSAVE (Operating System XSave) is supported
+            [[nodiscard]] bool supports_osxsave() const noexcept { return m_standard_features_ecx[27]; }
+
+            // \return returns true if RDRAND (Hardware Random Number Generator) is supported
+            [[nodiscard]] bool supports_rdrand() const noexcept { return m_standard_features_ecx[30]; }
+
+            // \return returns true if F16C (16-bit Floating-Point Conversion) is supported
+            [[nodiscard]] bool supports_f16c() const noexcept { return m_standard_features_ecx[29]; }
+
+            // Miscellaneous Features
+            // \return returns true if MSR (Model-Specific Registers) are supported
+            [[nodiscard]] bool supports_msr() const noexcept { return m_standard_features_edx[5]; }
+
+            // \return returns true if CMPXCHG8 instruction is supported
+            [[nodiscard]] bool supports_cx8() const noexcept { return m_standard_features_edx[8]; }
+
+            // \return returns true if SYSENTER/SYSEXIT instructions are supported
+            [[nodiscard]] bool supports_sep() const noexcept { return m_standard_features_edx[11]; }
+
+            // \return returns true if CMOV (Conditional Move) is supported
+            [[nodiscard]] bool supports_cmov() const noexcept { return m_standard_features_edx[15]; }
+
+            // \return returns true if CLFLUSH (Cache Line Flush) instruction is supported
+            [[nodiscard]] bool supports_clflush() const noexcept { return m_standard_features_edx[19]; }
+
+            // \return returns true if MMX (MultiMedia Extensions) is supported
+            [[nodiscard]] bool supports_mmx() const noexcept { return m_standard_features_edx[23]; }
+
+            // \return returns true if FXSAVE/FXRSTOR instructions are supported
+            [[nodiscard]] bool supports_fxsr() const noexcept { return m_standard_features_edx[24]; }
+
+            // Extended Features
+            // \return returns true if FSGSBASE instructions are supported
+            [[nodiscard]] bool supports_fsgsbase() const noexcept { return m_extended_features_ebx[0]; }
+
+            // \return returns true if BMI1 (Bit Manipulation Instructions Set 1) is supported
+            [[nodiscard]] bool supports_bmi1() const noexcept { return m_extended_features_ebx[3]; }
+
+            // \return returns true if HLE (Hardware Lock Elision) is supported on Intel CPUs
+            [[nodiscard]] bool supports_hle() const noexcept { return m_is_intel && m_extended_features_ebx[4]; }
+
+            // \return returns true if BMI2 (Bit Manipulation Instructions Set 2) is supported
+            [[nodiscard]] bool supports_bmi2() const noexcept { return m_extended_features_ebx[8]; }
+
+            // \return returns true if Enhanced REP MOVSB/STOSB is supported
+            [[nodiscard]] bool supports_erms() const noexcept { return m_extended_features_ebx[9]; }
+
+            // \return returns true if INVPCID (Invalidate Process-Context Identifier) is supported
+            [[nodiscard]] bool supports_invpcid() const noexcept { return m_extended_features_ebx[10]; }
+
+            // \return returns true if RTM (Restricted Transactional Memory) is supported on Intel CPUs
+            [[nodiscard]] bool supports_rtm() const noexcept { return m_is_intel && m_extended_features_ebx[11]; }
+
+            // \return returns true if RDSEED (Random Seed) instruction is supported
+            [[nodiscard]] bool supports_rdseed() const noexcept { return m_extended_features_ebx[18]; }
+
+            // \return returns true if ADX (Multi-Precision Add-Carry Instruction Extensions) is supported
+            [[nodiscard]] bool supports_adx() const noexcept { return m_extended_features_ebx[19]; }
+
+            // \return returns true if SHA (Secure Hash Algorithm) instructions are supported
+            [[nodiscard]] bool supports_sha() const noexcept { return m_extended_features_ebx[29]; }
+
+            // \return returns true if PREFETCHWT1 instruction is supported
+            [[nodiscard]] bool supports_prefetchwt1() const noexcept { return m_extended_features_ecx[0]; }
+
+            // AMD and Intel-Specific Features
+            // \return returns true if SYSCALL/SYSRET instructions are supported on Intel CPUs
+            [[nodiscard]] bool supports_syscall() const noexcept { return m_is_intel && m_amd_extended_features_edx[11]; }
+
+            // \return returns true if LZCNT (Leading Zero Count) is supported on Intel CPUs
+            [[nodiscard]] bool supports_lzcnt() const noexcept { return m_is_intel && m_amd_extended_features_ecx[5]; }
+
+            // \return returns true if RDTSCP (Read Time-Stamp Counter) instruction is supported on Intel CPUs
+            [[nodiscard]] bool supports_rdtscp() const noexcept { return m_is_intel && m_amd_extended_features_edx[27]; }
+
+            // clang-format on
+
+        private:
+            constexpr static auto cpuid_base = 0x80000000;
+
+            class caches_info {
+            public:
+                caches_info() noexcept {
+                    parse_cache_info();
+                }
+
+                [[nodiscard]] auto l1_size() const noexcept {
+                    return memory_converter{ m_cache_sizes[0] };
+                }
+
+                [[nodiscard]] auto l2_size() const noexcept {
+                    return memory_converter{ m_cache_sizes[1] };
+                }
+
+                [[nodiscard]] auto l3_size() const noexcept {
+                    return memory_converter{ m_cache_sizes[2] };
+                }
+
+                [[nodiscard]] auto total_size() const noexcept {
+                    return memory_converter{ l1_size() + l2_size() + l3_size() };
+                }
+
+            private:
+                void parse_cache_info() noexcept {
+                    std::array<std::int32_t, 4> cpu_info{};
+
+                    // CPUID for cache hierarchy (EAX=4)
+                    for ( int i = 0;; ++i ) {
+                        __cpuidex( cpu_info.data(), 4, i );
+
+                        // Check cache type (bits [3:0] of EAX) - 0 means no more caches
+                        std::int32_t cache_type = cpu_info[0] & 0xF;
+                        if ( cache_type == 0 )
+                            break; // No more caches
+
+                        // Extract cache level (bits [7:5] of EAX)
+                        std::int32_t cache_level = ( cpu_info[0] >> 5 ) & 0x7;
+                        std::int32_t cache_size = ( ( cpu_info[1] >> 22 ) + 1 ) *   // Number of sets
+                                                  ( ( cpu_info[1] & 0xFFF ) + 1 ) * // Line size (in bytes)
+                                                  ( ( cpu_info[2] & 0x3FF ) + 1 ) * // Associativity (ways of set associativity)
+                                                  ( cpu_info[3] + 1 );              // Number of partitions
+
+                        // Adjust cache_level (1-3) to array index (0-2)
+                        m_cache_sizes[cache_level - 1] = cache_size;
+                    }
+                }
+
+                std::array<std::int32_t, 3> m_cache_sizes;
+            };
+
+            // https://en.wikipedia.org/wiki/CPUID
+            void parse_cpu_fields() noexcept {
+                std::array<int, 4> cpu_info{};
+
+                // Get highest standard CPUID function ID
+                __cpuid( cpu_info.data(), 0 );
+                m_max_standard_id = cpu_info[0];
+
+                // Query and store information for all standard CPUID functions
+                for ( std::int32_t i = 0; i <= m_max_standard_id; ++i ) {
+                    __cpuidex( cpu_info.data(), i, 0 );
+                    m_standard_data.push_back( cpu_info );
+                }
+
+                m_vendor = extract_cpu_vendor();
+
+                // Read standard feature flags from function
+                // 0x00000001 (ECX and EDX registers)
+                if ( m_max_standard_id >= 1 ) {
+                    m_standard_features_ecx = m_standard_data[1][2]; // ECX features
+                    m_standard_features_edx = m_standard_data[1][3]; // EDX features
+                }
+
+                // Read extended feature flags from function
+                // 0x00000007 (EBX and ECX registers)
+                if ( m_max_standard_id >= 7 ) {
+                    m_extended_features_ebx = m_standard_data[7][1]; // EBX features
+                    m_extended_features_ecx = m_standard_data[7][2]; // ECX features
+                }
+
+                // To determine the highest supported extended CPUID
+                // function, call CPUID with EAX = 0x80000000
+                __cpuid( cpu_info.data(), cpuid_base );
+                m_max_extended_id = cpu_info[0];
+
+                // Gather information for all extended CPUID
+                // functions starting from 0x80000000
+                for ( std::int32_t i = cpuid_base; i <= m_max_extended_id; ++i ) {
+                    __cpuidex( cpu_info.data(), i, 0 );
+                    m_extended_data.push_back( cpu_info );
+                }
+
+                // Read extended feature flags (ECX and EDX)
+                // from function 0x80000001
+                if ( m_max_extended_id >= cpuid_base + 1 ) {
+                    m_amd_extended_features_ecx = m_extended_data[1][2]; // ECX features
+                    m_amd_extended_features_edx = m_extended_data[1][3]; // EDX features
+                }
+
+                // Extract the processor brand string from
+                // functions 0x80000002 to 0x80000004
+                if ( m_max_extended_id >= cpuid_base + 4 ) {
+                    m_brand = extract_cpu_brand();
+                }
+            }
+
+            std::string extract_cpu_vendor() noexcept {
+                std::array<char, 12> vendor_bytes{};
+                std::array<int, 3> vendor_ids = { m_standard_data[0][1], m_standard_data[0][3], m_standard_data[0][2] };
+                memcpy( vendor_bytes.data(), vendor_ids.data(), sizeof( vendor_ids ) );
+
+                const std::string vendor_str( vendor_bytes.data(), vendor_bytes.size() );
+                const auto hashed_str = hash64_t{}( vendor_str );
+
+                // Intel || Intel (rare)
+                if ( hashed_str == hash64_t( "GenuineIntel" ) || hashed_str == hash64_t( "GenuineIotel" ) ) {
+                    m_is_intel = true;
+                }
+                // AMD || Early samples of AMD K5 processor
+                else if ( hashed_str == hash64_t( "AuthenticAMD" ) || hashed_str == hash64_t( "AMD ISBETTER" ) ) {
+                    m_is_amd = true;
+                }
+
+                return vendor_str;
+            }
+
+            std::string extract_cpu_brand() const noexcept {
+                std::array<char, 48> vendor_bytes{};
+                memcpy( vendor_bytes.data(), m_extended_data[2].data(), sizeof( m_extended_data[2] ) );
+                memcpy( vendor_bytes.data() + 16, m_extended_data[3].data(), sizeof( m_extended_data[3] ) );
+                memcpy( vendor_bytes.data() + 32, m_extended_data[4].data(), sizeof( m_extended_data[4] ) );
+                return std::string( vendor_bytes.begin(), vendor_bytes.end() );
+            }
+
+            std::int32_t m_max_standard_id{ 0 };
+            std::int32_t m_max_extended_id{ 0 };
+            std::string m_vendor;
+            std::string m_brand;
+            bool m_is_intel{ false };
+            bool m_is_amd{ false };
+            std::bitset<32> m_standard_features_ecx;
+            std::bitset<32> m_standard_features_edx;
+            std::bitset<32> m_extended_features_ebx;
+            std::bitset<32> m_extended_features_ecx;
+            std::bitset<32> m_amd_extended_features_ecx;
+            std::bitset<32> m_amd_extended_features_edx;
+            std::vector<std::array<int, 4>> m_standard_data;
+            std::vector<std::array<int, 4>> m_extended_data;
+        };
+
         // \note: Some useful benchmarks to understand the
         // difference in the bytewise vs collection rate
         // using SSE intrinsics, benched using 2MB span:
@@ -1039,9 +1406,9 @@ namespace shadow {
             using vector128_t = __m128i;
 
         public:
-            [[nodiscard]] Ty compute( const std::span<const char> data ) const {
-                const auto  size = data.size();
-                auto        sum = _mm_setzero_si128();
+            explicit memory_checksum( const std::span<const char> data ) noexcept {
+                const auto size = data.size();
+                auto sum = _mm_setzero_si128();
                 std::size_t pos = 0;
 
                 // The main feature of vectorized byte collection is
@@ -1053,13 +1420,15 @@ namespace shadow {
                     process_block( data, pos, sum );
 
                 // Just sum up all 16-bit words from the "sum"
-                Ty total_sum = sum_16bit_words( sum );
+                m_result = sum_16bit_words( sum );
 
                 // If the sum of bytes is not a multiple of 16, there
                 // will be a "tail" of remaining bytes, collect them.
-                total_sum += append_tail( data, pos );
+                m_result += append_tail( data, pos ) * std::numeric_limits<Ty>::max();
+            }
 
-                return total_sum * 58998238934ull;
+            [[nodiscard]] Ty result() const noexcept {
+                return m_result;
             }
 
         private:
@@ -1088,6 +1457,8 @@ namespace shadow {
                     return acc + static_cast<unsigned char>( byte );
                 } );
             }
+
+            Ty m_result{ 0 };
         };
 
         class export_enumerator {
@@ -1131,7 +1502,7 @@ namespace shadow {
                 using pointer = value_type*;
                 using reference = value_type&;
 
-                iterator(): m_exports( nullptr ), m_index( 0 ), m_value( {} ) {};
+                iterator(): m_exports( nullptr ), m_index( 0 ), m_value( {} ) { };
                 ~iterator() = default;
                 iterator( const iterator& ) = default;
                 iterator( iterator&& ) = default;
@@ -1210,8 +1581,8 @@ namespace shadow {
                 }
 
                 const export_enumerator* m_exports;
-                std::size_t              m_index;
-                mutable value_type       m_value;
+                std::size_t m_index;
+                mutable value_type m_value;
             };
 
             // Make sure the iterator is compatible with std::ranges
@@ -1254,7 +1625,7 @@ namespace shadow {
                 return m_module_base.offset<win::export_directory_t*>( export_data_dir.rva );
             }
 
-            address_t                m_module_base;
+            address_t m_module_base;
             win::export_directory_t* m_export_table{ nullptr };
         };
 
@@ -1317,12 +1688,12 @@ namespace shadow {
             [[nodiscard]] auto section_checksum( hash32_t section_name = ".text" ) const {
                 const auto module_base = base_address();
                 const auto sections = image()->get_nt_headers()->sections();
-                auto       section = std::find_if( sections.begin(), sections.end(), [=]( const win::section_header_t& section ) {
+                auto section = std::find_if( sections.begin(), sections.end(), [=]( const win::section_header_t& section ) {
                     return section_name == hash32_t{}( section.name.view() );
                 } );
 
                 const auto section_content = std::span{ module_base.ptr<char>( section->virtual_address ), section->virtual_size };
-                return memory_checksum<Ty>{}.compute( section_content );
+                return memory_checksum<Ty>{ section_content }.result();
             }
 
         private:
@@ -1422,7 +1793,7 @@ namespace shadow {
                     m_value = dynamic_link_library{ table_entry };
                 }
 
-                win::list_entry*   m_entry;
+                win::list_entry* m_entry;
                 mutable value_type m_value;
             };
 
@@ -1479,7 +1850,7 @@ namespace shadow {
 
         private:
             struct export_with_location {
-                address_t                    address{ 0 };
+                address_t address{ 0 };
                 detail::dynamic_link_library location{};
             };
 
@@ -1488,7 +1859,7 @@ namespace shadow {
                     return { 0, {} };
 
                 constexpr bool skip_current_module = true;
-                const auto     loaded_modules = module_enumerator{ skip_current_module };
+                const auto loaded_modules = module_enumerator{ skip_current_module };
 
                 for ( const auto& module : loaded_modules ) {
                     if ( module_hash != 0 && is_module_hash_invalid( module_hash, module.name().view() ) )
@@ -1549,13 +1920,13 @@ namespace shadow {
                 return { view, {} };
             }
 
-            address_t                    m_address{ 0 };
+            address_t m_address{ 0 };
             detail::dynamic_link_library m_dll{};
         };
 
         inline dynamic_link_library dynamic_link_library::find( hash64_t module_name ) const {
             module_enumerator modules{};
-            auto              it = modules.find_if( [=, this]( const dynamic_link_library& dll ) -> bool {
+            auto it = modules.find_if( [=, this]( const dynamic_link_library& dll ) -> bool {
                 return !dll.name().view().empty() && is_module_hash_valid( module_name, dll.name().view() );
             } );
             return it != modules.end() ? *it : dynamic_link_library{};
@@ -1566,47 +1937,47 @@ namespace shadow {
             constexpr operation_system( std::uint32_t major, std::uint32_t minor, std::uint32_t build_num ) noexcept
                 : m_major_version( major ), m_minor_version( minor ), m_build_number( build_num ) { }
 
-            [[nodiscard]] bool is_windows_11() const {
+            [[nodiscard]] auto is_windows_11() const {
                 return m_major_version == 10 && m_build_number >= 22000;
             }
 
-            [[nodiscard]] bool is_windows_10() const {
+            [[nodiscard]] auto is_windows_10() const {
                 return m_major_version == 10 && m_build_number < 22000;
             }
 
-            [[nodiscard]] bool is_windows_8_1() const {
+            [[nodiscard]] auto is_windows_8_1() const {
                 return verify_version_mask( 6, 3 );
             }
 
-            [[nodiscard]] bool is_windows_8() const {
+            [[nodiscard]] auto is_windows_8() const {
                 return verify_version_mask( 6, 2 );
             }
 
-            [[nodiscard]] bool is_windows_7() const {
+            [[nodiscard]] auto is_windows_7() const {
                 return verify_version_mask( 6, 1 );
             }
 
-            [[nodiscard]] bool is_windows_xp() const {
+            [[nodiscard]] auto is_windows_xp() const {
                 return verify_version_mask( 6, 0 );
             }
 
-            [[nodiscard]] bool is_windows_vista() const {
+            [[nodiscard]] auto is_windows_vista() const {
                 return verify_version_mask( 5, 1 );
             }
 
-            [[nodiscard]] uint32_t major_version() const {
+            [[nodiscard]] auto major_version() const {
                 return m_major_version;
             }
 
-            [[nodiscard]] uint32_t minor_version() const {
+            [[nodiscard]] auto minor_version() const {
                 return m_minor_version;
             }
 
-            [[nodiscard]] uint32_t build_number() const {
+            [[nodiscard]] auto build_number() const {
                 return m_build_number;
             }
 
-            [[nodiscard]] std::string formatted() const {
+            [[nodiscard]] auto formatted() const {
                 return std::format( "Windows {}.{} (Build {})", m_major_version, m_minor_version, m_build_number );
             }
 
@@ -1623,25 +1994,25 @@ namespace shadow {
             constexpr time_formatter( std::uint64_t unix_timestamp ) noexcept: m_unix_seconds( unix_timestamp ) { }
 
             // \return European format: "dd.mm.yyyy hh:mm"
-            [[nodiscard]] std::string format_european() const {
+            [[nodiscard]] auto format_european() const {
                 auto [year, month, day, hours, minutes, _] = break_down_unix_time( m_unix_seconds );
                 return std::format( "{:02}.{:02}.{} {:02}:{:02}", day, month, year, hours, minutes );
             }
 
             // \return American format: "mm/dd/yyyy hh:mm"
-            [[nodiscard]] std::string format_american() const {
+            [[nodiscard]] auto format_american() const {
                 auto [year, month, day, hours, minutes, _] = break_down_unix_time( m_unix_seconds );
                 return std::format( "{:02}/{:02}/{} {:02}:{:02}", month, day, year, hours, minutes );
             }
 
             // \return ISO 8601 format: "yyyy-mm-ddThh:mm:ss"
-            [[nodiscard]] std::string format_iso8601() const {
+            [[nodiscard]] auto format_iso8601() const {
                 auto [year, month, day, hours, minutes, seconds] = break_down_unix_time( m_unix_seconds );
                 return std::format( "{}-{:02}-{:02}T{:02}:{:02}:{:02}", year, month, day, hours, minutes, seconds );
             }
 
             // \return Raw unix timestamp as integral
-            [[nodiscard]] std::uint64_t time_since_epoch() const noexcept {
+            [[nodiscard]] auto time_since_epoch() const noexcept {
                 return m_unix_seconds;
             }
 
@@ -1651,12 +2022,12 @@ namespace shadow {
 
         private:
             struct timestamp {
-                int32_t  year;
+                int32_t year;
                 uint32_t month;
                 uint32_t day;
-                int32_t  hours;
-                int32_t  minutes;
-                int32_t  seconds;
+                int32_t hours;
+                int32_t minutes;
+                int32_t seconds;
             };
 
             timestamp break_down_unix_time( std::uint64_t unix_timestamp ) const {
@@ -1666,12 +2037,12 @@ namespace shadow {
                 auto time_since_midnight = std::chrono::duration_cast<std::chrono::seconds>( time_point - days );
 
                 std::chrono::year_month_day ymd{ days };
-                timestamp                   stamp{ .year = static_cast<int32_t>( ymd.year() ),
-                                                   .month = static_cast<uint32_t>( ymd.month() ),
-                                                   .day = static_cast<uint32_t>( ymd.day() ),
-                                                   .hours = static_cast<int32_t>( std::chrono::duration_cast<std::chrono::hours>( time_since_midnight ).count() ),
-                                                   .minutes = static_cast<int32_t>( std::chrono::duration_cast<std::chrono::minutes>( time_since_midnight ).count() % 60 ),
-                                                   .seconds = static_cast<int32_t>( time_since_midnight.count() % 60 ) };
+                timestamp stamp{ .year = static_cast<int32_t>( ymd.year() ),
+                                 .month = static_cast<uint32_t>( ymd.month() ),
+                                 .day = static_cast<uint32_t>( ymd.day() ),
+                                 .hours = static_cast<int32_t>( std::chrono::duration_cast<std::chrono::hours>( time_since_midnight ).count() ),
+                                 .minutes = static_cast<int32_t>( std::chrono::duration_cast<std::chrono::minutes>( time_since_midnight ).count() % 60 ),
+                                 .seconds = static_cast<int32_t>( time_since_midnight.count() % 60 ) };
 
                 return stamp;
             }
@@ -1684,11 +2055,11 @@ namespace shadow {
             constexpr zoned_time( std::uint64_t unix_timestamp, std::int64_t timezone_offset ) noexcept
                 : m_unix_seconds( unix_timestamp ), m_timezone_offset( timezone_offset ) { }
 
-            [[nodiscard]] time_formatter utc() const noexcept {
+            [[nodiscard]] auto utc() const noexcept {
                 return time_formatter{ m_unix_seconds };
             }
 
-            [[nodiscard]] time_formatter local() const noexcept {
+            [[nodiscard]] auto local() const noexcept {
                 return time_formatter{ m_unix_seconds + m_timezone_offset };
             }
 
@@ -1698,7 +2069,7 @@ namespace shadow {
 
         private:
             std::uint64_t m_unix_seconds;
-            std::int64_t  m_timezone_offset;
+            std::int64_t m_timezone_offset;
         };
 
         template <typename T> concept ChronoDuration = std::is_base_of_v<std::chrono::duration<typename T::rep, typename T::period>, T>;
@@ -1714,11 +2085,11 @@ namespace shadow {
         public:
             // The read-only user-mode address for the shared data
             // is 0x7ffe0000, both in 32-bit and 64-bit Windows.
-            static constexpr shadow::address_t memory_location{ 0x7ffe0000 };
+            constexpr static shadow::address_t memory_location{ 0x7ffe0000 };
 
             // The difference in epochs depicted in seconds between
             // "January 1st, 1601" and "January 1st, 1970".
-            static constexpr std::chrono::seconds epoch_difference{ 0x2b6109100 };
+            constexpr static std::chrono::seconds epoch_difference{ 0x2b6109100 };
 
             // Windows time is always represented as 100-nanosecond
             // interval. Define a type to easily convert through.
@@ -1731,37 +2102,40 @@ namespace shadow {
                 return m_data;
             }
 
-            [[nodiscard]] bool kernel_debugger_present() const noexcept {
+            [[nodiscard]] auto kernel_debugger_present() const noexcept {
                 return m_data->kernel_debugger_enabled;
             }
 
-            [[nodiscard]] bool safe_boot_enabled() const noexcept {
+            [[nodiscard]] auto safe_boot_enabled() const noexcept {
                 return m_data->safe_boot_mode;
             }
 
-            [[nodiscard]] std::uint32_t boot_id() const noexcept {
+            [[nodiscard]] auto boot_id() const noexcept {
                 return m_data->boot_id;
             }
 
-            [[nodiscard]] std::uint32_t physical_pages_num() const noexcept {
+            [[nodiscard]] auto physical_pages_num() const noexcept {
                 return m_data->number_of_physical_pages;
             }
 
-            [[nodiscard]] std::wstring_view system_root() const noexcept( std::is_nothrow_constructible_v<std::wstring_view> ) {
-                return std::wstring_view{ m_data->nt_system_root };
+            [[nodiscard]] auto system_root() const noexcept {
+                const std::wstring_view wstr{ m_data->nt_system_root };
+                auto string_pointer = const_cast<wchar_t*>( wstr.data() );
+                auto string_size = static_cast<std::uint16_t>( wstr.size() );
+                return win::unicode_string{ string_pointer, string_size };
             }
 
-            [[nodiscard]] std::uint32_t timezone_id() const noexcept {
+            [[nodiscard]] auto timezone_id() const noexcept {
                 return m_data->time_zone_id;
             }
 
             template <ChronoDuration Ty>
-            [[nodiscard]] Ty timezone_offset() const noexcept( std::is_nothrow_constructible_v<Ty> ) {
+            [[nodiscard]] auto timezone_offset() const noexcept( std::is_nothrow_constructible_v<Ty> ) {
                 std::chrono::seconds seconds{ parse_time_zone_bias() };
                 return std::chrono::duration_cast<Ty>( seconds );
             }
 
-            [[nodiscard]] operation_system system() const {
+            [[nodiscard]] auto system() const {
                 const auto major = m_data->nt_major_version;
                 const auto minor = m_data->nt_minor_version;
                 const auto build_num = m_data->nt_build_number;
@@ -1770,7 +2144,7 @@ namespace shadow {
 
             // \return 100-ns interval. Timestamp starting
             // from Windows epoch, "January 1st, 1601"
-            [[nodiscard]] std::uint64_t windows_epoch_timestamp() const {
+            [[nodiscard]] auto windows_epoch_timestamp() const {
                 const auto system_time = m_data->system_time;
                 const auto windows_time_100ns = static_cast<uint64_t>( system_time.high1_time ) << 32 | system_time.low_part;
                 return windows_time_100ns;
@@ -1778,7 +2152,7 @@ namespace shadow {
 
             // \return Seconds. Timestamp starting from
             // Unix epoch, "January 1st, 1970"
-            [[nodiscard]] zoned_time unix_epoch_timestamp() const {
+            [[nodiscard]] auto unix_epoch_timestamp() const {
                 // Windows time is measured in 100-nanosecond intervals.
                 // Convert 100-ns intervals to seconds, formula is:
                 // 1 second = 10,000,000 100-ns intervals
@@ -1788,10 +2162,10 @@ namespace shadow {
             }
 
         private:
-            int64_t parse_time_zone_bias() const {
+            std::int64_t parse_time_zone_bias() const {
                 const auto bias = m_data->time_zone_bias;
                 // Build 64-bit value from low_part and high1_time
-                const auto bias_100ns = ( static_cast<int64_t>( bias.high1_time ) << 32 ) | bias.low_part;
+                const auto bias_100ns = ( static_cast<std::int64_t>( bias.high1_time ) << 32 ) | bias.low_part;
 
                 // The time offset is measured from local time to UTC,
                 // in 100-ns intervals. Convert 100-ns intervals to
@@ -1818,7 +2192,7 @@ namespace shadow {
         public:
             value_t operator[]( key_t export_hash ) {
                 std::shared_lock lock( m_cache_mutex );
-                auto             it = m_cache_map.find( export_hash );
+                auto it = m_cache_map.find( export_hash );
                 return it == m_cache_map.end() ? value_t{} : it->second;
             }
 
@@ -1834,11 +2208,11 @@ namespace shadow {
 
         private:
             // Making sure that's every `cache_map` call is safe.
-            mutable std::shared_mutex          m_cache_mutex{};
+            mutable std::shared_mutex m_cache_mutex{};
             std::unordered_map<key_t, value_t> m_cache_map{};
         };
 
-        static inline memory_cache<std::uint32_t, hash64_t::underlying_t>      ssn_cache;
+        static inline memory_cache<std::uint32_t, hash64_t::underlying_t> ssn_cache;
         static inline memory_cache<detail::dll_export, hash64_t::underlying_t> address_cache;
 
 #endif
@@ -1910,7 +2284,10 @@ namespace shadow {
         return detail::shared_data{};
     }
 
-    /* General utilities that could theoretically be useful outside the header */
+    inline auto cpu() {
+        static detail::hardware_processor processor;
+        return processor;
+    }
 
     // nt_memory_allocator allocates memory based on "Nt" memory
     // functions located at "ntdll.dll".
@@ -1926,7 +2303,7 @@ namespace shadow {
 
         [[nodiscard]] Ty* allocate( std::size_t n ) const {
             std::size_t size = n * sizeof( Ty );
-            void*       ptr = nt_virtual_alloc( nullptr, size, memory_commit | memory_reserve, page_rwx );
+            void* ptr = virtual_alloc( nullptr, size, memory_commit | memory_reserve, page_rwx );
             if ( !ptr )
                 throw std::bad_alloc();
             return static_cast<Ty*>( ptr );
@@ -1935,27 +2312,27 @@ namespace shadow {
         template <typename PtrTy>
         void deallocate( PtrTy p, std::size_t n ) noexcept {
             std::size_t size = n * sizeof( Ty );
-            nt_virtual_free( static_cast<void*>( p ), size, memory_release );
+            virtual_free( static_cast<void*>( p ), size, memory_release );
         }
 
     private:
         using NTSTATUS = std::int32_t;
 
-        void* nt_virtual_alloc( void* address, std::uint64_t allocation_size, std::uint32_t allocation_t, std::uint32_t protect ) const {
-            void*            current_process{ reinterpret_cast<void*>( -1 ) };
-            void*            base_address = address;
-            std::uint64_t    region_size = allocation_size;
+        void* virtual_alloc( void* address, std::uint64_t allocation_size, std::uint32_t allocation_t, std::uint32_t protect ) const {
+            void* current_process{ reinterpret_cast<void*>( -1 ) };
+            void* base_address = address;
+            std::uint64_t region_size = allocation_size;
             static address_t allocation_procedure{ dll_export( "NtAllocateVirtualMemory", "ntdll.dll" ).address() };
 
             auto result = allocation_procedure.execute<NTSTATUS>( current_process, &base_address, 0ull, &region_size, allocation_t & 0xFFFFFFC0, protect );
             return result >= 0 ? base_address : nullptr;
         }
 
-        bool nt_virtual_free( void* address, std::uint64_t allocation_size, std::uint32_t flags ) const {
-            NTSTATUS         result{ 0 };
-            auto             region_size{ allocation_size };
-            void*            base_address = address;
-            void*            current_process{ reinterpret_cast<void*>( -1 ) };
+        bool virtual_free( void* address, std::uint64_t allocation_size, std::uint32_t flags ) const {
+            NTSTATUS result{ 0 };
+            auto region_size{ allocation_size };
+            void* base_address = address;
+            void* current_process{ reinterpret_cast<void*>( -1 ) };
             static address_t free_procedure{ dll_export( "NtFreeVirtualMemory", "ntdll.dll" ).address() };
 
             if ( ( flags & 0xFFFF3FFC ) != 0 || ( flags & 0x8003 ) == 0x8000 && allocation_size )
@@ -1968,10 +2345,10 @@ namespace shadow {
             return result >= 0;
         }
 
-        static constexpr auto memory_commit{ 0x1000 };
-        static constexpr auto memory_reserve{ 0x2000 };
-        static constexpr auto memory_release{ 0x8000 };
-        static constexpr auto page_rwx{ 0x40 };
+        constexpr static auto memory_commit{ 0x1000 };
+        constexpr static auto memory_reserve{ 0x2000 };
+        constexpr static auto memory_release{ 0x8000 };
+        constexpr static auto page_rwx{ 0x40 };
     };
 
     template <std::uint32_t shell_size>
@@ -2023,9 +2400,9 @@ namespace shadow {
         }
 
     private:
-        void*                                m_shellcode_fn = nullptr;
-        void*                                m_memory = nullptr;
-        nt_memory_allocator<std::uint8_t>    m_allocator;
+        void* m_shellcode_fn = nullptr;
+        void* m_memory = nullptr;
+        nt_memory_allocator<std::uint8_t> m_allocator;
         std::array<std::uint8_t, shell_size> m_shellcode;
     };
 
@@ -2039,7 +2416,7 @@ namespace shadow {
     template <typename Ty, typename ErrTy>
         requires( std::is_enum_v<ErrTy> )
     struct call_result_t {
-        Ty                   value;
+        Ty value;
         std::optional<ErrTy> error;
 
         operator Ty() {
@@ -2050,9 +2427,10 @@ namespace shadow {
     template <typename Ty>
     class syscaller {
     public:
+        constexpr static auto is_type_ntstatus = std::is_same_v<std::remove_cv_t<Ty>, long>;
+
         // Parser needs to return std::optional<uint32_t> and accept (syscaller&, address_t)
         using ssn_parser_t = detail::stack_function<std::optional<uint32_t>( syscaller&, address_t )>;
-        using is_return_type_ntstatus = std::is_same<std::remove_cv_t<Ty>, long>;
 
         static_assert( std::is_fundamental_v<Ty>, "Nt/Zw functions cannot return the type you specified."
                                                   "Type should be fundamental" );
@@ -2071,12 +2449,12 @@ namespace shadow {
             if ( !parse_result || m_last_error ) {
                 // Return -1 if type is NTSTATUS (call failed),
                 // otherwise return default-constructible (0)
-                return is_return_type_ntstatus::value ? call_result_t{ Ty{ -1 }, get_last_error() } : call_result_t{ Ty{}, get_last_error() };
+                return is_type_ntstatus ? call_result_t{ Ty{ -1 }, m_last_error } : call_result_t{ Ty{}, m_last_error };
             } else {
                 m_service_number = *parse_result;
             }
             setup_shellcode();
-            return { m_shellcode.execute<Ty>( shadow::detail::convert_nulls_to_nullptrs( args )... ), get_last_error() };
+            return { m_shellcode.execute<Ty>( shadow::detail::convert_nulls_to_nullptrs( args )... ), m_last_error };
         }
 
         void set_custom_ssn_parser( ssn_parser_t parser ) {
@@ -2118,7 +2496,7 @@ namespace shadow {
         }
 
         // Syscall ID is at an offset of 4 bytes from the specified address.
-        // \note Not considering the situation when EDR hook is installed
+        // \note: Not considering the situation when EDR hook is installed
         // Learn more here: https://github.com/annihilatorq/shadow_syscall/issues/1
         std::uint32_t default_ssn_parser( address_t export_address ) {
             auto address = export_address.ptr<std::uint8_t>();
@@ -2134,9 +2512,9 @@ namespace shadow {
 
     private:
         hash64_t::underlying_t m_name_hash;
-        std::uint32_t          m_service_number;
-        std::optional<errc>    m_last_error;
-        ssn_parser_t           m_ssn_parser;
+        std::uint32_t m_service_number;
+        std::optional<errc> m_last_error;
+        ssn_parser_t m_ssn_parser;
 
         shellcode<13> m_shellcode = {
             0x49, 0x89, 0xCA,                         // mov r10, rcx
@@ -2147,10 +2525,8 @@ namespace shadow {
     };
 
     template <typename Ty>
+        requires( std::is_default_constructible_v<Ty> )
     class importer {
-    public:
-        static_assert( std::is_default_constructible_v<Ty>, "Return type must be default-constructible" );
-
     public:
         explicit importer( hash64_t import_name, hash64_t module_name = 0 ): m_export( get_export( import_name, module_name ) ) { }
 
@@ -2182,7 +2558,7 @@ namespace shadow {
 #endif
         }
 
-        Ty                 m_call_result{};
+        Ty m_call_result{};
         detail::dll_export m_export{ 0 };
     };
 } // namespace shadow
@@ -2212,7 +2588,7 @@ template <typename Ty = long, class... Args>
     requires( shadow::is_x64 )
 inline shadow::call_result_t<Ty, shadow::errc> shadowsyscall( shadow::hash64_t syscall_name, Args&&... args ) {
     shadow::syscaller<std::remove_cv_t<Ty>> sc{ syscall_name };
-    auto                                    result = sc( shadow::detail::convert_nulls_to_nullptrs( args )... );
+    auto result = sc( shadow::detail::convert_nulls_to_nullptrs( args )... );
     return shadow::call_result_t{ result, sc.get_last_error() };
 }
 
