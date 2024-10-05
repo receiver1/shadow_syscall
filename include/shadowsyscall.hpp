@@ -34,6 +34,8 @@
 #include <string_view>
 #include <variant>
 
+#undef max // Win32 "utilities" ^_^
+
 namespace shadow {
 
     [[maybe_unused]] constexpr auto bitness = std::numeric_limits<uintptr_t>::digits;
