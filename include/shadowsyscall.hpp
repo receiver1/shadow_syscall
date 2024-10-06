@@ -93,7 +93,7 @@ namespace shadow {
             if ( m_address == 0 )
                 return Ty{};
 
-            return reinterpret_cast<Ty ( * )( Args... )>( m_address )( args... );
+            return reinterpret_cast<Ty( __stdcall* )( Args... )>( m_address )( args... );
         }
 
         constexpr explicit operator std::uintptr_t() const noexcept {
