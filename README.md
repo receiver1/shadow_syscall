@@ -52,8 +52,8 @@ void execute_syscall_with_custom_ssn( shadow::hash64_t function_name ) {
     sc.set_custom_ssn_parser( custom_ssn_parser );
 
     auto current_process = reinterpret_cast<void*>( -1 );
-    std::uint32_t debug_port{ 0 };
-    auto [status, err] = sc( current_process, 7, &debug_port, sizeof( uint64_t ), nullptr );
+    std::uintptr_t debug_port{ 0 };
+    auto [status, err] = sc( current_process, 7, &debug_port, sizeof( std::uintptr_t ), nullptr );
     if ( err )
         std::cerr << "Syscall error occurred: " << *err << '\n';
 
