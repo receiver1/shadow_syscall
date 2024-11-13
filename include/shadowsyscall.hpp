@@ -2536,25 +2536,28 @@ namespace shadow {
     };
 
     template <typename Ty>
-        requires( std::is_default_constructible_v<Ty> )
+    using NonVoidResult = std::conditional_t<std::is_void_v<Ty>, std::monostate, Ty>;
+
+    template <typename Ty, typename ResultTy = NonVoidResult<Ty>>
+        requires( std::is_default_constructible_v<ResultTy> )
     class importer {
     public:
         explicit importer( hash64_t import_name, hash64_t module_name = 0 ): m_export( get_export( import_name, module_name ) ) { }
 
         template <typename... Args>
-        Ty operator()( Args&&... args ) noexcept {
-            return m_call_result = m_export.address().execute<Ty>( shadow::detail::convert_nulls_to_nullptrs( args )... );
+        ResultTy operator()( Args&&... args ) noexcept {
+            return m_call_result = m_export.address().execute<ResultTy>( shadow::detail::convert_nulls_to_nullptrs( args )... );
         }
 
         [[nodiscard]] auto export_location() const noexcept {
             return m_export.location();
         }
 
-        [[nodiscard]] Ty result() const noexcept {
-            return static_cast<Ty>( *this );
+        [[nodiscard]] ResultTy result() const noexcept {
+            return static_cast<ResultTy>( *this );
         }
 
-        operator Ty() const {
+        operator ResultTy() const {
             return m_call_result;
         }
 
@@ -2573,7 +2576,7 @@ namespace shadow {
 #endif
         }
 
-        Ty m_call_result{};
+        ResultTy m_call_result{};
         detail::dll_export m_export{ 0 };
     };
 } // namespace shadow
