@@ -2550,6 +2550,10 @@ namespace shadow {
             return m_export.location();
         }
 
+        [[nodiscard]] Ty result() const noexcept {
+            return static_cast<Ty>( *this );
+        }
+
         operator Ty() const {
             return m_call_result;
         }
