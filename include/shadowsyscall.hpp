@@ -88,10 +88,13 @@ namespace shadow {
         }
 
         template <typename Ty, typename... Args>
-            requires( std::conjunction_v<is_fundamental_or_pointer<Args>...> )
         [[nodiscard]] Ty execute( Args... args ) const noexcept {
-            if ( m_address == 0 )
-                return Ty{};
+            if ( m_address == 0 ) {
+                if constexpr ( std::is_pointer_v<Ty> )
+                    return nullptr;
+                else
+                    return Ty{};
+            }
 
             return reinterpret_cast<Ty( __stdcall* )( Args... )>( m_address )( args... );
         }
