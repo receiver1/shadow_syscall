@@ -1,0 +1,15 @@
+[cmake]
+version = "3.15"
+cmkr-include = "cmkr.cmake"
+
+[project]
+name = "shadow_syscall"
+languages = ["CXX"]
+
+[target.shadow_syscall]
+type = "interface"
+include-directories = ["include/"]
+
+[target.shadow_syscall.properties]
+CXX_STANDARD = 20
+CXX_STANDARD_REQUIRED = true
