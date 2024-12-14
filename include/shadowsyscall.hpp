@@ -984,6 +984,11 @@ namespace shadow {
                     m_value += fnv1a_append_bytes<>( m_value, string[i] );
             }
 
+            consteval basic_hash(const char* string, std::size_t len) {
+                for (auto i = 0; i < len; i++)
+                m_value += fnv1a_append_bytes<>(m_value, string[i]);
+            }
+
         public:
             // Method for calculating hash at runtime. Accepts
             // any object with range properties.
@@ -2262,6 +2267,16 @@ namespace shadow {
 
     using hash32_t = detail::basic_hash<uint32_t>;
     using hash64_t = detail::basic_hash<uint64_t>;
+
+    namespace literals {
+        consteval hash32_t operator""_h32(const char* str, std::size_t len) noexcept {
+            return hash32_t{str, len};
+        }
+
+        consteval hash64_t operator""_h64(const char* str, std::size_t len) noexcept {
+            return hash64_t{str, len};
+        }
+    }  // namespace literals
 
     // Used in `shadowcall` to create a pairing
     // with simple syntax, e.g.{ "name", "name" }
