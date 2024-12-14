@@ -29,6 +29,21 @@ project(shadow_syscall
 		CXX
 )
 
+include(FetchContent)
+
+# Fix warnings about DOWNLOAD_EXTRACT_TIMESTAMP
+if(POLICY CMP0135)
+	cmake_policy(SET CMP0135 NEW)
+endif()
+message(STATUS "Fetching linux-pe (master)...")
+FetchContent_Declare(linux-pe
+	GIT_REPOSITORY
+		"https://github.com/can1357/linux-pe"
+	GIT_TAG
+		master
+)
+FetchContent_MakeAvailable(linux-pe)
+
 # Target: shadow_syscall
 add_library(shadow_syscall INTERFACE)
 

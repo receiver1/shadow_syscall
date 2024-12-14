@@ -6,6 +6,9 @@ cmkr-include = "cmkr.cmake"
 name = "shadow_syscall"
 languages = ["CXX"]
 
+[fetch-content]
+linux-pe = { git = "https://github.com/can1357/linux-pe", tag = "master" }
+
 [target.shadow_syscall]
 type = "interface"
 include-directories = ["include/"]
